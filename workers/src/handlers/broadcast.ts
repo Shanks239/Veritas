@@ -6,8 +6,8 @@
  * Idempotent: agents that have already committed are skipped.
  */
 
-import { txCommit }                          from '../lib/sui';
-import { hashPredictionBytes, encodeForCommit } from '../lib/bcs';
+import { txCommit, type SuiClientType, type SuiKeypairType } from '../lib/sui';
+import { hashPredictionBytes } from '../lib/bcs';
 import {
   KV as KVKey,
   type Env,
@@ -28,8 +28,8 @@ const AGENT_TIMEOUT_MS = 45_000; // deliberation_ms - 15s buffer
  */
 export async function broadcastAndCommit(
   meta:    WindowMeta,
-  client:  ReturnType<import('../lib/sui').buildClient>,
-  keypair: ReturnType<import('../lib/sui').buildKeypair>,
+  client:  SuiClientType,
+  keypair: SuiKeypairType,
   env:     Env,
 ): Promise<void> {
   const [feedRaw, agentsRaw] = await Promise.all([
@@ -66,8 +66,8 @@ async function collectAndCommit(
   agentAddress: string,
   meta:         WindowMeta,
   feed:         FeedSnapshot,
-  client:       ReturnType<import('../lib/sui').buildClient>,
-  keypair:      ReturnType<import('../lib/sui').buildKeypair>,
+  client:       SuiClientType,
+  keypair:      SuiKeypairType,
   env:          Env,
 ): Promise<void> {
   // Skip if already committed this window
@@ -90,7 +90,6 @@ async function collectAndCommit(
 
   // Hash in BCS — this is what gets committed on-chain
   const hashBytes = hashPredictionBytes(prediction);
-  const preimage  = encodeForCommit(prediction);
 
   // Submit commit transaction
   const commitId = await txCommit(client, keypair, env, meta.windowId, hashBytes);
@@ -100,7 +99,7 @@ async function collectAndCommit(
     windowId:     meta.windowId,
     agentAddress,
     commitId,
-    hash:         Buffer.from(hashBytes).toString('hex'),
+    hash:         Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join(''),
     prediction,
   };
 

@@ -8,6 +8,9 @@ import { Ed25519Keypair }            from '@mysten/sui/keypairs/ed25519';
 import { Transaction }               from '@mysten/sui/transactions';
 import type { Env, ScoreComponentsScaled } from '../types';
 
+export type SuiClientType  = SuiClient;
+export type SuiKeypairType = Ed25519Keypair;
+
 // ── Client + keypair ──────────────────────────────────────────────────────────
 
 export function buildClient(env: Env): SuiClient {
@@ -18,7 +21,10 @@ export function buildClient(env: Env): SuiClient {
 }
 
 export function buildKeypair(env: Env): Ed25519Keypair {
-  const raw = Buffer.from(env.SUI_PRIVATE_KEY, 'base64');
+  const base64 = env.SUI_PRIVATE_KEY;
+  const binary = atob(base64);
+  const raw    = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
   return Ed25519Keypair.fromSecretKey(raw);
 }
 

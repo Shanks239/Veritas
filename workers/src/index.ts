@@ -12,7 +12,7 @@ import type { Env }    from './types';
 
 export default {
   // ── Cron trigger (every minute) ──────────────────────────────────────────
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       handleCron(env).catch(err => console.error('[worker] cron error:', err))
     );

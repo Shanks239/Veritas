@@ -18,24 +18,25 @@ import {
   txReveal,
   txRecordScore,
   txRecordMiss,
+  type SuiClientType,
+  type SuiKeypairType,
 } from '../lib/sui';
-import { fetchMidPrice }          from '../lib/feed';
+import { fetchMidPrice }                from '../lib/feed';
 import { computeScores, scaleForChain } from '../lib/scoring';
-import { encodeForCommit }        from '../lib/bcs';
+import { encodeForCommit }              from '../lib/bcs';
 import {
   KV as KVKey,
   type Env,
   type WindowMeta,
   type CommitRecord,
-  type AgentPrediction,
 } from '../types';
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function resolveAndScore(
   meta:    WindowMeta,
-  client:  ReturnType<import('../lib/sui').buildClient>,
-  keypair: ReturnType<import('../lib/sui').buildKeypair>,
+  client:  SuiClientType,
+  keypair: SuiKeypairType,
   env:     Env,
 ): Promise<void> {
   // 1. Fetch outcome price
@@ -62,8 +63,8 @@ async function scoreAgent(
   agentAddress: string,
   meta:         WindowMeta,
   outcomePrice: number,
-  client:       ReturnType<import('../lib/sui').buildClient>,
-  keypair:      ReturnType<import('../lib/sui').buildKeypair>,
+  client:       SuiClientType,
+  keypair:      SuiKeypairType,
   env:          Env,
 ): Promise<void> {
   const commitRaw = await env.KV.get(KVKey.windowCommit(meta.windowId, agentAddress));
@@ -129,19 +130,12 @@ async function scoreAgent(
  */
 async function uploadRevealData(
   record: CommitRecord,
-  scores: ReturnType<typeof computeScores>,
-  env:    Env,
+  _scores: ReturnType<typeof computeScores>,
+  _env:    Env,
 ): Promise<string> {
-  const payload = {
-    windowId:     record.windowId,
-    agentAddress: record.agentAddress,
-    prediction:   record.prediction,
-    scores,
-    revealedAt:   Date.now(),
-  };
-
   // TODO: replace with real IPFS/Walrus upload
-  // const cid = await pinataUpload(JSON.stringify(payload), env.PINATA_JWT)
+  // const payload = { windowId: record.windowId, prediction: record.prediction, scores: _scores }
+  // const cid = await pinataUpload(JSON.stringify(payload), _env.PINATA_JWT)
   // return cid
 
   // Stub: use commit hash as placeholder CID

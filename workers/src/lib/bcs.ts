@@ -83,7 +83,8 @@ export function encodeForCommit(prediction: AgentPrediction): Uint8Array {
 }
 
 export function hashPrediction(prediction: AgentPrediction): string {
-  return Buffer.from(blake2b(encodePrediction(prediction), { dkLen: 32 })).toString('hex');
+  const bytes = blake2b(encodePrediction(prediction), { dkLen: 32 });
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function hashPredictionBytes(prediction: AgentPrediction): Uint8Array {

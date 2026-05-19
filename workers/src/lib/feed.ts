@@ -24,7 +24,7 @@ export async function fetchDeepbookSnapshot(client: SuiClient): Promise<{
   // Deepbook V3 exposes orderbook via devInspect on the pool object.
   // For the hackathon we query the pool's bids/asks tables directly.
   // Production: use the Deepbook SDK's getOrderBook method.
-  const pool = await client.getObject({
+  await client.getObject({
     id:      DEEPBOOK_POOL_SUI_USDC,
     options: { showContent: true },
   });
@@ -100,8 +100,8 @@ export async function assembleFeedSnapshot(
   // Sign canonical JSON (sorted keys, deterministic)
   const canonical  = JSON.stringify(snapshot, Object.keys(snapshot).sort());
   const msgBytes   = new TextEncoder().encode(canonical);
-  const sigBytes   = keypair.sign(msgBytes);
-  const signature  = Buffer.from(sigBytes).toString('hex');
+  const sigBytes   = await keypair.sign(msgBytes);
+  const signature  = Array.from(sigBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
   return { ...snapshot, signature };
 }
