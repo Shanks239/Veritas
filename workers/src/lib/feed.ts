@@ -1,65 +1,88 @@
 /**
- * Feed aggregation: Deepbook orderbook snapshot + CoinGecko price.
- * Worker signs the feed so agents can verify data provenance.
+ * Feed aggregation: Deepbook V3 orderbook snapshot + CoinGecko price.
+ *
+ * Uses @mysten/deepbook-v3 SDK methods:
+ *   - midPrice(poolKey)          → current mid-price
+ *   - getLevel2TicksFromMid()    → bid/ask depth around mid
  */
 
-import { SuiClient } from '@mysten/sui/client';
+import { DeepBookClient } from '@mysten/deepbook-v3';
+import { SuiClient }      from '@mysten/sui/client';
 import type { Env, FeedSnapshot, DeepbookLevel } from '../types';
 
-// Deepbook V3 pool ID for SUI/USDC on testnet — replace with mainnet ID for prod
-const DEEPBOOK_POOL_SUI_USDC = '0xTODO_DEEPBOOK_POOL_ID';
-const PRICE_SCALE             = 1_000_000;
+const PRICE_SCALE = 1_000_000;
+const POOL_KEY    = 'SUI_USDC';  // built-in key in SDK constants
+const DEPTH_TICKS = 10;          // N ticks each side from mid
 
 // ── Deepbook ──────────────────────────────────────────────────────────────────
 
+function buildDeepBookClient(
+  client:  SuiClient,
+  address: string,
+  env:     string,
+): DeepBookClient {
+  return new DeepBookClient({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client:  client as any,   // SDK uses internal SuiClient type — cast is safe
+    address,
+    env:    env === 'mainnet' ? 'mainnet' : 'testnet',
+  });
+}
+
 /**
- * Read orderbook depth from Deepbook V3.
- * Returns top 10 levels on each side, prices scaled by PRICE_SCALE.
+ * Fetch orderbook depth and mid-price from Deepbook V3 SUI/USDC pool.
  */
-export async function fetchDeepbookSnapshot(client: SuiClient): Promise<{
+export async function fetchDeepbookSnapshot(
+  client:  SuiClient,
+  address: string,
+  env:     string,
+): Promise<{
   bids:     DeepbookLevel[];
   asks:     DeepbookLevel[];
   midPrice: number;
 }> {
-  // Deepbook V3 exposes orderbook via devInspect on the pool object.
-  // For the hackathon we query the pool's bids/asks tables directly.
-  // Production: use the Deepbook SDK's getOrderBook method.
-  await client.getObject({
-    id:      DEEPBOOK_POOL_SUI_USDC,
-    options: { showContent: true },
-  });
+  const dbClient = buildDeepBookClient(client, address, env);
 
-  // TODO: parse Deepbook pool content into bids/asks levels
-  // Placeholder implementation — replace with real Deepbook SDK call
-  const bids: DeepbookLevel[] = [];
-  const asks: DeepbookLevel[] = [];
+  // Fetch mid-price and depth in parallel
+  const [mid, depth] = await Promise.all([
+    dbClient.midPrice(POOL_KEY),
+    dbClient.getLevel2TicksFromMid(POOL_KEY, DEPTH_TICKS),
+  ]);
 
-  // Real implementation would look like:
-  // const { bids, asks } = await deepbookClient.getOrderBook(POOL_ID, 10)
+  // Convert parallel price/qty arrays to DeepbookLevel[]
+  const bids: DeepbookLevel[] = depth.bid_prices.map((price, i) => ({
+    price: Math.round(price    * PRICE_SCALE),
+    qty:   Math.round((depth.bid_quantities[i] ?? 0) * PRICE_SCALE),
+  })).sort((a, b) => b.price - a.price);  // highest bid first
 
-  const bestBid = bids[0]?.price ?? 0;
-  const bestAsk = asks[0]?.price ?? 0;
-  const midPrice = bestBid > 0 && bestAsk > 0
-    ? Math.round((bestBid + bestAsk) / 2)
-    : 0;
+  const asks: DeepbookLevel[] = depth.ask_prices.map((price, i) => ({
+    price: Math.round(price    * PRICE_SCALE),
+    qty:   Math.round((depth.ask_quantities[i] ?? 0) * PRICE_SCALE),
+  })).sort((a, b) => a.price - b.price);  // lowest ask first
+
+  const midPrice = Math.round(mid * PRICE_SCALE);
 
   return { bids, asks, midPrice };
 }
 
 /**
- * Read Deepbook mid-price only (used for entry price at window close
- * and outcome price at horizon).
+ * Read Deepbook mid-price only.
+ * Used for entry price at window close and outcome price at horizon.
  */
-export async function fetchMidPrice(client: SuiClient): Promise<number> {
-  const { midPrice } = await fetchDeepbookSnapshot(client);
-  return midPrice;
+export async function fetchMidPrice(
+  client:  SuiClient,
+  address: string,
+  env:     string,
+): Promise<number> {
+  const dbClient = buildDeepBookClient(client, address, env);
+  const mid      = await dbClient.midPrice(POOL_KEY);
+  return Math.round(mid * PRICE_SCALE);
 }
 
 // ── CoinGecko ─────────────────────────────────────────────────────────────────
 
 export async function fetchCoinGeckoPrice(apiKey: string): Promise<number> {
-  const url = 'https://api.coingecko.com/api/v3/simple/price'
-    + '?ids=sui&vs_currencies=usd';
+  const url = 'https://api.coingecko.com/api/v3/simple/price?ids=sui&vs_currencies=usd';
 
   const res = await fetch(url, {
     headers: { 'x-cg-demo-api-key': apiKey },
@@ -73,18 +96,16 @@ export async function fetchCoinGeckoPrice(apiKey: string): Promise<number> {
 
 // ── Snapshot assembly + signing ───────────────────────────────────────────────
 
-/**
- * Assemble a complete feed snapshot for a window.
- * Signs the canonical JSON with the Worker's Ed25519 keypair.
- */
 export async function assembleFeedSnapshot(
-  windowId:  string,
-  client:    SuiClient,
-  env:       Env,
-  keypair:   import('@mysten/sui/keypairs/ed25519').Ed25519Keypair,
+  windowId: string,
+  client:   SuiClient,
+  env:      Env,
+  keypair:  import('@mysten/sui/keypairs/ed25519').Ed25519Keypair,
 ): Promise<FeedSnapshot> {
+  const address = keypair.toSuiAddress();
+
   const [deepbook, coingeckoPrice] = await Promise.all([
-    fetchDeepbookSnapshot(client),
+    fetchDeepbookSnapshot(client, address, env.SUI_NETWORK),
     fetchCoinGeckoPrice(env.COINGECKO_API_KEY),
   ]);
 
@@ -97,11 +118,10 @@ export async function assembleFeedSnapshot(
     coingeckoPrice,
   };
 
-  // Sign canonical JSON (sorted keys, deterministic)
-  const canonical  = JSON.stringify(snapshot, Object.keys(snapshot).sort());
-  const msgBytes   = new TextEncoder().encode(canonical);
-  const sigBytes   = await keypair.sign(msgBytes);
-  const signature  = Array.from(sigBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const canonical = JSON.stringify(snapshot, Object.keys(snapshot).sort());
+  const msgBytes  = new TextEncoder().encode(canonical);
+  const sigBytes  = await keypair.sign(msgBytes);
+  const signature = Array.from(sigBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
   return { ...snapshot, signature };
 }

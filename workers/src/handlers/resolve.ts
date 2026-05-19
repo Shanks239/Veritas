@@ -40,7 +40,8 @@ export async function resolveAndScore(
   env:     Env,
 ): Promise<void> {
   // 1. Fetch outcome price
-  const outcomePrice = await fetchMidPrice(client);
+  const address      = keypair.toSuiAddress();
+  const outcomePrice = await fetchMidPrice(client, address, env.SUI_NETWORK);
 
   // 2. Resolve window on-chain
   await txResolveWindow(client, keypair, env, meta.windowId, outcomePrice);

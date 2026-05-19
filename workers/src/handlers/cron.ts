@@ -119,7 +119,7 @@ async function processWindow(
 
       // Deliberation just closed — record entry price, advance phase
       if (now >= meta.closesAt) {
-        const entryPrice = await fetchMidPrice(client);
+        const entryPrice = await fetchMidPrice(client, keypair.toSuiAddress(), env.SUI_NETWORK);
         meta.entryPrice  = entryPrice;
         meta.phase       = 'awaiting_horizon';
         await env.KV.put(KVKey.windowMeta(windowId), JSON.stringify(meta));
