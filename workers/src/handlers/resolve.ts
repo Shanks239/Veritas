@@ -120,27 +120,67 @@ async function scoreAgent(
   );
 }
 
-// ── IPFS / Walrus upload ──────────────────────────────────────────────────────
+// ── Walrus upload ─────────────────────────────────────────────────────────────
+
+// Public Walrus testnet publisher — no auth, no wallet required
+// Mainnet: https://publisher.walrus.space
+const WALRUS_PUBLISHER = 'https://publisher.walrus-testnet.walrus.space';
+const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space';
+const WALRUS_EPOCHS = 5;  // store for 5 epochs (~10 days on testnet)
 
 /**
- * Upload the full prediction + scores JSON for public auditability.
- * Returns a content identifier (IPFS CID or Walrus blob ID).
- *
- * Hackathon: stub that returns a deterministic identifier from the commit hash.
- * Production: upload to IPFS via Pinata/web3.storage, or Walrus on Sui.
+ * Upload prediction + scores JSON to Walrus decentralized storage.
+ * Returns the blob ID which serves as the reveal_ref stored on-chain.
+ * Blob is publicly readable via aggregator: GET /v1/blobs/<blob_id>
  */
 async function uploadRevealData(
   record: CommitRecord,
-  _scores: ReturnType<typeof computeScores>,
-  _env:    Env,
+  scores: ReturnType<typeof computeScores>,
+  env:    Env,
 ): Promise<string> {
-  // TODO: replace with real IPFS/Walrus upload
-  // const payload = { windowId: record.windowId, prediction: record.prediction, scores: _scores }
-  // const cid = await pinataUpload(JSON.stringify(payload), _env.PINATA_JWT)
-  // return cid
+  const payload = JSON.stringify({
+    windowId:     record.windowId,
+    agentAddress: record.agentAddress,
+    commitHash:   record.hash,
+    prediction:   record.prediction,
+    scores: {
+      brierScore: scores.brierScore,
+      pnlNorm:    scores.pnlNorm,
+      drawdown:   scores.drawdown,
+      composite:  scores.composite,
+    },
+    revealedAt: new Date().toISOString(),
+    network:    env.SUI_NETWORK,
+  });
 
-  // Stub: use commit hash as placeholder CID
-  const cid = `veritas-reveal-${record.hash.slice(0, 16)}`;
-  console.log(`[resolve] reveal data stub CID: ${cid}`);
-  return cid;
+  const res = await fetch(
+    `${WALRUS_PUBLISHER}/v1/blobs?epochs=${WALRUS_EPOCHS}`,
+    {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    payload,
+    },
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Walrus upload failed ${res.status}: ${text}`);
+  }
+
+  const data = await res.json() as {
+    newlyCreated?: { blobObject: { blobId: string } };
+    alreadyCertified?: { blobId: string };
+  };
+
+  // Walrus returns either newlyCreated or alreadyCertified
+  const blobId =
+    data.newlyCreated?.blobObject?.blobId ??
+    data.alreadyCertified?.blobId;
+
+  if (!blobId) {
+    throw new Error(`Walrus upload succeeded but no blob ID in response: ${JSON.stringify(data)}`);
+  }
+
+  console.log(`[resolve] uploaded to Walrus: ${WALRUS_AGGREGATOR}/v1/blobs/${blobId}`);
+  return blobId;
 }
