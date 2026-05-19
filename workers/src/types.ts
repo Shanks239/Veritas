@@ -8,6 +8,8 @@ export interface Env {
   REGISTRY_ID:     string;
   SUI_PRIVATE_KEY: string;   // secret
   COINGECKO_API_KEY: string; // secret
+  SALT_SECRET:     string;   // secret — used for deterministic salt derivation
+  GOOGLE_CLIENT_ID: string;  // secret — Google OAuth app client ID
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────

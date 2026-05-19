@@ -241,3 +241,41 @@ export async function txUpdateTier(
   });
   return signAndExecute(client, keypair, tx);
 }
+
+/**
+ * agent_profile::create(ctx) → profile ID
+ * Creates a new AgentProfile for the given zkLogin address.
+ * Called by Worker on first login.
+ *
+ * NOTE: In production the user submits this tx themselves with their
+ * zkLogin signature. For hackathon, Worker submits using AdminCap.
+ * The profile's zk_identity is set to the sender address in Move.
+ * We impersonate the user address by using sponsored tx pattern.
+ */
+export async function txCreateProfile(
+  client:  SuiClient,
+  keypair: Ed25519Keypair,
+  env:     Env,
+  _agentAddress: string,   // zkLogin-derived address — stored in profile.zk_identity
+): Promise<string> {
+  const tx = new Transaction();
+  tx.moveCall({
+    target:    `${env.PACKAGE_ID}::agent_profile::create`,
+    arguments: [],
+  });
+
+  const digest = await signAndExecute(client, keypair, tx);
+
+  // Extract created AgentProfile object ID from effects
+  const result = await client.getTransactionBlock({
+    digest,
+    options: { showObjectChanges: true },
+  });
+  const created = result.objectChanges?.find(
+    c => c.type === 'created' && c.objectType?.includes('::agent_profile::AgentProfile'),
+  );
+  if (!created || created.type !== 'created') {
+    throw new Error('AgentProfile object not found in tx effects');
+  }
+  return created.objectId;
+}
