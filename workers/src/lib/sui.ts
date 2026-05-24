@@ -65,6 +65,9 @@ export async function txOpenWindow(
   });
   const digest = await signAndExecute(client, keypair, tx);
 
+  // Wait for RPC to index the transaction
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   // Extract created Window object ID from effects
   const result = await client.getTransactionBlock({
     digest,
