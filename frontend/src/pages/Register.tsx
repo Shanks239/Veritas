@@ -2,11 +2,38 @@ import { useState } from 'react'
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core'
 import { useSuiTransaction } from '../hooks/useSuiTransaction'
 
+const label: React.CSSProperties = {
+  fontSize: '0.6875rem',
+  color: 'rgba(255,255,255,0.35)',
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  display: 'block',
+  marginBottom: '8px',
+}
+
+const REQUIREMENTS = [
+  { icon: '→', text: 'Accept POST requests with the Veritas prediction payload' },
+  { icon: '→', text: 'Respond with distribution + signed order within 45 seconds' },
+  { icon: '→', text: 'Probabilities across all buckets must sum to 1.0' },
+  { icon: '→', text: 'Sign your response with your registered keypair' },
+]
+
+const TIERS = [
+  { tier: 'T1', score: '≥ 0.50', limit: '100 USDC', fee: '20%', markets: 'SUI/USDC' },
+  { tier: 'T2', score: '≥ 0.65', limit: '1,000 USDC', fee: '15%', markets: 'Top 5' },
+  { tier: 'T3', score: '≥ 0.80', limit: '10,000 USDC', fee: '10%', markets: 'All' },
+  { tier: 'T4', score: '≥ 0.92', limit: 'Unlimited', fee: '0%', markets: 'All + propose' },
+]
+
+const TIER_COLORS: Record<string, string> = {
+  T1: '#60a5fa', T2: '#34d399', T3: '#fbbf24', T4: '#c084fc',
+}
+
 export default function Register() {
   const { primaryWallet } = useDynamicContext()
   const { registerAgent } = useSuiTransaction()
   const [endpoint, setEndpoint] = useState('')
-  const [status, setStatus] = useState<string | null>(null)
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
   const [loading, setLoading] = useState(false)
 
   async function handleRegister() {
@@ -15,66 +42,136 @@ export default function Register() {
     setStatus(null)
     try {
       const digest = await registerAgent(endpoint)
-      setStatus(`✓ Agent registered. Tx: ${digest.slice(0, 16)}...`)
+      setStatus({ type: 'success', msg: `Agent registered · Tx: ${digest.slice(0, 16)}…` })
     } catch (err) {
-      setStatus(`Error: ${String(err)}`)
+      setStatus({ type: 'error', msg: String(err) })
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="space-y-6 max-w-xl">
-      <div>
-        <h1 className="text-2xl font-bold">Register Agent</h1>
-        <p className="text-gray-400 text-sm mt-1">
-          Deploy your agent and register its endpoint. Once registered,
-          the Worker will broadcast prediction requests to your agent each window.
+    <div>
+      <div style={{ marginBottom: '2.5rem' }}>
+        <h2 style={{ fontFamily: '"DM Serif Display", Georgia, serif', fontSize: '1.75rem', fontWeight: 400, margin: '0 0 0.4rem', color: '#fff' }}>
+          Register Agent
+        </h2>
+        <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)', margin: 0 }}>
+          Deploy your agent, register its endpoint, and start competing in prediction windows
         </p>
       </div>
 
       {!primaryWallet && (
-        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-yellow-300 text-sm">
-          Connect your wallet to register an agent.
+        <div style={{
+          padding: '14px 16px',
+          border: '1px solid rgba(251,191,36,0.2)',
+          borderRadius: '8px',
+          background: 'rgba(251,191,36,0.05)',
+          fontSize: '0.8125rem',
+          color: 'rgba(251,191,36,0.8)',
+          marginBottom: '1.5rem',
+        }}>
+          Connect your wallet to register an agent
         </div>
       )}
 
-      <div className="space-y-4">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '2.5rem' }}>
         <div>
-          <label className="text-sm text-gray-400 block mb-2">Agent Endpoint URL</label>
+          <span style={label}>Agent Endpoint URL</span>
           <input
             type="url"
             value={endpoint}
             onChange={e => setEndpoint(e.target.value)}
             placeholder="https://your-agent.example.com/predict"
-            className="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
           />
-          <p className="text-xs text-gray-500 mt-1">
-            Must accept POST requests with the Veritas prediction payload.
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-white/10 p-4 space-y-2 text-xs text-gray-400">
-          <div className="text-white text-sm font-medium mb-3">Agent requirements</div>
-          <div>✓ Accepts POST with window feed data</div>
-          <div>✓ Returns distribution + order within 45s</div>
-          <div>✓ Signs response with registered keypair</div>
-          <div>✓ Probabilities must sum to 1.0</div>
+          <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.2)', marginTop: '6px' }}>
+            The Worker broadcasts prediction requests to this URL every window
+          </div>
         </div>
 
         <button
           onClick={handleRegister}
           disabled={!primaryWallet || !endpoint || loading}
-          className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            padding: '12px',
+            borderRadius: '8px',
+            border: 'none',
+            background: !primaryWallet || !endpoint || loading ? 'rgba(255,255,255,0.06)' : '#7c3aed',
+            color: !primaryWallet || !endpoint || loading ? 'rgba(255,255,255,0.2)' : '#fff',
+            fontSize: '0.875rem',
+            fontWeight: 500,
+            cursor: loading ? 'wait' : 'pointer',
+            transition: 'background 0.2s',
+          }}
         >
-          {loading ? 'Registering...' : 'Register Agent'}
+          {loading ? 'Registering…' : 'Register Agent'}
         </button>
 
         {status && (
-          <div className={`text-sm mt-2 ${status.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>
-            {status}
+          <div style={{
+            padding: '12px 16px',
+            borderRadius: '8px',
+            border: `1px solid ${status.type === 'success' ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'}`,
+            background: status.type === 'success' ? 'rgba(52,211,153,0.05)' : 'rgba(248,113,113,0.05)',
+            fontSize: '0.8125rem',
+            color: status.type === 'success' ? '#34d399' : '#f87171',
+            fontFamily: '"DM Mono", monospace',
+          }}>
+            {status.msg}
           </div>
         )}
+      </div>
+
+      {/* Requirements */}
+      <div style={{ marginBottom: '2.5rem' }}>
+        <div style={{ ...label, marginBottom: '12px' }}>Agent Requirements</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {REQUIREMENTS.map(r => (
+            <div key={r.text} style={{ display: 'flex', gap: '12px', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.5)' }}>
+              <span style={{ color: 'rgba(255,255,255,0.2)', flexShrink: 0 }}>{r.icon}</span>
+              {r.text}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tier table */}
+      <div>
+        <div style={{ ...label, marginBottom: '12px' }}>Privilege Tiers</div>
+        <div style={{
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: '10px',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '60px 1fr 1fr 60px 1fr',
+            padding: '10px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.07)',
+            fontSize: '0.6875rem',
+            color: 'rgba(255,255,255,0.2)',
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}>
+            {['Tier', 'Score', 'Position', 'Fee', 'Markets'].map(h => <div key={h}>{h}</div>)}
+          </div>
+          {TIERS.map((t, i) => (
+            <div key={t.tier} style={{
+              display: 'grid',
+              gridTemplateColumns: '60px 1fr 1fr 60px 1fr',
+              padding: '12px 16px',
+              borderBottom: i < TIERS.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+              fontSize: '0.8125rem',
+              alignItems: 'center',
+            }}>
+              <div style={{ fontWeight: 500, color: TIER_COLORS[t.tier] }}>{t.tier}</div>
+              <div style={{ fontFamily: '"DM Mono", monospace', color: 'rgba(255,255,255,0.6)' }}>{t.score}</div>
+              <div style={{ color: 'rgba(255,255,255,0.6)' }}>{t.limit}</div>
+              <div style={{ fontFamily: '"DM Mono", monospace', color: 'rgba(255,255,255,0.6)' }}>{t.fee}</div>
+              <div style={{ color: 'rgba(255,255,255,0.6)' }}>{t.markets}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

@@ -14,29 +14,49 @@ interface WindowData {
   resolved: boolean
 }
 
-function Countdown({ target }: { target: number }) {
+function Countdown({ target, dim }: { target: number; dim?: boolean }) {
   const [remaining, setRemaining] = useState(target - Date.now())
-
   useEffect(() => {
-    const interval = setInterval(() => {
-      setRemaining(target - Date.now())
-    }, 1000)
+    const interval = setInterval(() => setRemaining(target - Date.now()), 1000)
     return () => clearInterval(interval)
   }, [target])
 
-  if (remaining <= 0) return <span className="text-gray-500">Elapsed</span>
+  if (remaining <= 0) return (
+    <span style={{ color: 'rgba(255,255,255,0.2)', fontFamily: '"DM Mono", monospace', fontSize: '0.875rem' }}>
+      Elapsed
+    </span>
+  )
 
   const secs  = Math.floor(remaining / 1000)
   const mins  = Math.floor(secs / 60)
   const hours = Math.floor(mins / 60)
 
   return (
-    <span className="font-mono">
+    <span style={{
+      fontFamily: '"DM Mono", monospace',
+      fontSize: '0.875rem',
+      color: dim ? 'rgba(255,255,255,0.4)' : '#fff',
+    }}>
       {hours > 0 && `${hours}h `}
-      {(mins % 60).toString().padStart(2, '0')}m{' '}
-      {(secs % 60).toString().padStart(2, '0')}s
+      {String(mins % 60).padStart(2, '0')}m{' '}
+      {String(secs % 60).padStart(2, '0')}s
     </span>
   )
+}
+
+const PHASES: Record<string, { label: string; color: string; dot: string }> = {
+  deliberating:     { label: 'Deliberating',     color: '#60a5fa', dot: '#3b82f6' },
+  awaiting_horizon: { label: 'Awaiting horizon', color: '#fbbf24', dot: '#f59e0b' },
+  resolvable:       { label: 'Resolvable',       color: '#34d399', dot: '#10b981' },
+  resolved:         { label: 'Resolved',         color: 'rgba(255,255,255,0.2)', dot: 'rgba(255,255,255,0.15)' },
+}
+
+function getPhase(w: WindowData): string {
+  const now = Date.now()
+  if (now < w.closesAt)   return 'deliberating'
+  if (now < w.resolvesAt) return 'awaiting_horizon'
+  if (!w.resolved)        return 'resolvable'
+  return 'resolved'
 }
 
 async function fetchWindows(): Promise<WindowData[]> {
@@ -45,14 +65,8 @@ async function fetchWindows(): Promise<WindowData[]> {
     limit: 20,
     order: 'descending',
   })
-
   return events.data.map(e => {
-    const f = e.parsedJson as {
-      window_id: string
-      opens_at: string
-      closes_at: string
-      resolves_at: string
-    }
+    const f = e.parsedJson as { window_id: string; opens_at: string; closes_at: string; resolves_at: string }
     return {
       id:          f.window_id,
       opensAt:     Number(f.opens_at),
@@ -64,70 +78,90 @@ async function fetchWindows(): Promise<WindowData[]> {
   })
 }
 
-function phase(w: WindowData): { label: string; color: string } {
-  const now = Date.now()
-  if (now < w.closesAt)  return { label: 'Deliberating', color: 'text-blue-400' }
-  if (now < w.resolvesAt) return { label: 'Awaiting horizon', color: 'text-yellow-400' }
-  if (!w.resolved)        return { label: 'Resolvable', color: 'text-green-400' }
-  return { label: 'Resolved', color: 'text-gray-500' }
-}
-
 export default function Windows() {
   const { data: windows, isLoading } = useQuery({
     queryKey: ['windows'],
-    queryFn:  fetchWindows,
+    queryFn: fetchWindows,
     refetchInterval: 10_000,
   })
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Prediction Windows</h1>
-        <p className="text-gray-400 text-sm mt-1">
-          Active and recent windows — new window opens every 60s
+    <div>
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{
+          fontFamily: '"DM Serif Display", Georgia, serif',
+          fontSize: '1.75rem',
+          fontWeight: 400,
+          margin: '0 0 0.4rem',
+          color: '#fff',
+        }}>Prediction Windows</h2>
+        <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)', margin: 0 }}>
+          New window opens every 60s · agents have 60s to commit
         </p>
       </div>
 
-      {isLoading && <div className="text-gray-400 text-sm">Loading windows...</div>}
-
-      {windows && windows.length === 0 && (
-        <div className="text-gray-400 text-sm">No windows opened yet.</div>
-      )}
-
-      {windows && windows.length > 0 && (
-        <div className="space-y-3">
-          {windows.map(w => {
-            const p = phase(w)
-            return (
-              <div key={w.id} className="rounded-xl border border-white/10 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-gray-400">
-                    {w.id.slice(0, 10)}...
-                  </span>
-                  <span className={`text-xs font-medium ${p.color}`}>
-                    {p.label}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <div className="text-gray-500 text-xs mb-1">Closes in</div>
-                    <Countdown target={w.closesAt} />
-                  </div>
-                  <div>
-                    <div className="text-gray-500 text-xs mb-1">Resolves in</div>
-                    <Countdown target={w.resolvesAt} />
-                  </div>
-                  <div>
-                    <div className="text-gray-500 text-xs mb-1">Commits</div>
-                    <span className="font-mono">{w.commitCount}</span>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+      {isLoading && (
+        <div style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.875rem', padding: '2rem 0' }}>
+          Loading windows...
         </div>
       )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {windows?.map(w => {
+          const phase = getPhase(w)
+          const p = PHASES[phase]
+          const isActive = phase === 'deliberating' || phase === 'awaiting_horizon'
+
+          return (
+            <div key={w.id} style={{
+              border: `1px solid ${isActive ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'}`,
+              borderRadius: '10px',
+              padding: '16px 20px',
+              background: isActive ? 'rgba(255,255,255,0.02)' : 'transparent',
+              transition: 'border-color 0.2s',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '6px', height: '6px', borderRadius: '50%',
+                    background: p.dot,
+                    boxShadow: isActive ? `0 0 6px ${p.dot}` : 'none',
+                  }} />
+                  <span style={{
+                    fontFamily: '"DM Mono", monospace',
+                    fontSize: '0.75rem',
+                    color: 'rgba(255,255,255,0.3)',
+                  }}>
+                    {w.id.slice(0, 10)}…{w.id.slice(-6)}
+                  </span>
+                </div>
+                <span style={{
+                  fontSize: '0.6875rem',
+                  fontWeight: 500,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: p.color,
+                }}>{p.label}</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                {[
+                  { label: 'Closes in', value: <Countdown target={w.closesAt} dim={phase !== 'deliberating'} /> },
+                  { label: 'Resolves in', value: <Countdown target={w.resolvesAt} /> },
+                  { label: 'Commits', value: <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.875rem' }}>{w.commitCount}</span> },
+                ].map(stat => (
+                  <div key={stat.label}>
+                    <div style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                      {stat.label}
+                    </div>
+                    {stat.value}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
