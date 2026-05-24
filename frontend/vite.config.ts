@@ -4,6 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      external: ['@dynamic-labs-wallet/primitives'],
+    },
+  },
   optimizeDeps: {
     exclude: ['@mysten/sui'],
   },
