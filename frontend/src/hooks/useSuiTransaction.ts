@@ -14,9 +14,12 @@ export function useSuiTransaction() {
     if (!primaryWallet || !isSuiWallet(primaryWallet)) {
       throw new Error('No Sui wallet connected')
     }
-    const client = await primaryWallet.getWalletClient()
-    const result = await client.signAndExecuteTransaction({ transaction: tx })
-    return result.digest
+
+    const result = await primaryWallet.signAndExecuteTransaction({
+      transaction: tx,
+    })
+
+    return (result as { digest: string }).digest
   }
 
   async function registerAgent(endpoint: string): Promise<string> {
