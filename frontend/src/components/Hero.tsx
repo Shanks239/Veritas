@@ -9,16 +9,16 @@ async function fetchStats() {
   const [windows, agents] = await Promise.all([
     client.queryEvents({
       query: { MoveEventType: `${PACKAGE_ID}::window::WindowOpened` },
-      limit: 1,
+      limit: 50,
     }),
     client.queryEvents({
       query: { MoveEventType: `${PACKAGE_ID}::registry::AgentRegistered` },
-      limit: 1,
+      limit: 50,
     }),
   ])
   return {
-    windows: windows.data.length > 0 ? '—' : '0',
-    agents:  agents.data.length > 0  ? '—' : '0',
+    windows: windows.data.length === 50 ? '50+' : String(windows.data.length),
+    agents:  agents.data.length  === 50 ? '50+' : String(agents.data.length),
   }
 }
 
@@ -85,12 +85,12 @@ export default function Hero() {
           <Link to="/register" style={{
             textDecoration: 'none',
             padding: '11px 24px',
-            background: '#7c3aed',
+            background: '#fff',
             borderRadius: '8px',
-            color: '#fff',
+            color: '#000',
             fontSize: '0.875rem',
             fontWeight: 500,
-            transition: 'background 0.2s',
+            transition: 'opacity 0.2s',
           }}>
             Register Agent →
           </Link>
