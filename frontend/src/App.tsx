@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
 import { DynamicWidget, useDynamicContext } from '@dynamic-labs/sdk-react-core'
+import Hero from './components/Hero'
 import Leaderboard from './pages/Leaderboard'
 import Windows from './pages/Windows'
 import Profile from './pages/Profile'
@@ -62,70 +63,13 @@ function Nav() {
   )
 }
 
-function Hero() {
+function HomePage() {
   const { primaryWallet } = useDynamicContext()
-  if (primaryWallet) return null
   return (
-    <div style={{
-      padding: '6rem 2rem 4rem',
-      maxWidth: '800px',
-      margin: '0 auto',
-      textAlign: 'center',
-    }}>
-      <div style={{
-        display: 'inline-block',
-        padding: '4px 14px',
-        border: '1px solid rgba(255,255,255,0.15)',
-        borderRadius: '100px',
-        fontSize: '0.7rem',
-        letterSpacing: '0.12em',
-        textTransform: 'uppercase',
-        color: 'rgba(255,255,255,0.5)',
-        marginBottom: '2rem',
-      }}>
-        Sui Overflow 2026 · Agentic Web
-      </div>
-      <h1 style={{
-        fontFamily: '"DM Serif Display", Georgia, serif',
-        fontSize: 'clamp(2.5rem, 6vw, 4.5rem)',
-        fontWeight: 400,
-        color: '#fff',
-        lineHeight: 1.1,
-        margin: '0 0 1.5rem',
-        letterSpacing: '-0.02em',
-      }}>
-        Performance is the<br />only credential.
-      </h1>
-      <p style={{
-        fontSize: '1.0625rem',
-        color: 'rgba(255,255,255,0.5)',
-        lineHeight: 1.7,
-        maxWidth: '520px',
-        margin: '0 auto 3rem',
-      }}>
-        On-chain autonomous agent performance market. Agents compete on real market predictions.
-        Reputation is permanent. Privilege is earned.
-      </p>
-      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-        {[
-          { label: 'Commit-reveal predictions', icon: '◆' },
-          { label: 'On-chain reputation', icon: '◆' },
-          { label: 'Performance-gated privilege', icon: '◆' },
-          { label: 'Walrus storage', icon: '◆' },
-        ].map(f => (
-          <div key={f.label} style={{
-            padding: '6px 14px',
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '6px',
-            fontSize: '0.75rem',
-            color: 'rgba(255,255,255,0.55)',
-            letterSpacing: '0.02em',
-          }}>
-            <span style={{ color: 'rgba(255,255,255,0.25)', marginRight: '6px' }}>◆</span>
-            {f.label}
-          </div>
-        ))}
+    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 2rem 4rem' }}>
+      {!primaryWallet && <Hero />}
+      <div style={{ borderTop: primaryWallet ? 'none' : '1px solid rgba(255,255,255,0.06)', paddingTop: primaryWallet ? '2rem' : '3rem' }}>
+        <Leaderboard />
       </div>
     </div>
   )
@@ -140,17 +84,10 @@ export default function App() {
         color: '#fff',
         fontFamily: '"DM Sans", system-ui, sans-serif',
       }}>
-        <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
         <Nav />
         <Routes>
-          <Route path="/" element={
-            <>
-              <Hero />
-              <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 2rem 4rem' }}>
-                <Leaderboard />
-              </div>
-            </>
-          } />
+          <Route path="/" element={<HomePage />} />
           <Route path="/windows" element={
             <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '3rem 2rem' }}>
               <Windows />
