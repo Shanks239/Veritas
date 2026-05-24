@@ -6,3 +6,4 @@ contracts/build/
 .env
 workers/.env
 *.local
+contracts/build/
