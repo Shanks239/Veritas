@@ -14,6 +14,13 @@ import { buildClient, buildKeypair } from './lib/sui';
 import { getLoginParams, getOrCreateSalt, deriveAddress, decodeJwtClaims } from './lib/zklogin';
 import type { Env }                              from './types';
 
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+  });
+}
+
 export default {
   // ── Cron trigger (every minute) ──────────────────────────────────────────
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -26,6 +33,18 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url    = new URL(request.url);
     const client = buildClient(env);
+
+    // CORS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    }
 
     // ── GET /health ───────────────────────────────────────────────────────
     if (url.pathname === '/health') {
@@ -95,10 +114,19 @@ export default {
       }
     }
 
+    // ── GET /window/:windowId/stats ───────────────────────────────────────
+    // Returns commit count for a window by listing KV keys with that prefix.
+    const statsMatch = url.pathname.match(/^\/window\/([^/]+)\/stats$/);
+    if (statsMatch && request.method === 'GET') {
+      const windowId = statsMatch[1];
+      const { keys } = await env.KV.list({ prefix: `window:${windowId}:commit:` });
+      return json({ commitCount: keys.length });
+    }
+
     // ── POST /admin/sync-agents ───────────────────────────────────────────
     if (url.pathname === '/admin/sync-agents' && request.method === 'POST') {
       ctx.waitUntil(syncAgentRegistry(env));
-      return Response.json({ status: 'syncing' });
+      return json({ status: 'syncing' });
     }
 
     return new Response('not found', { status: 404 });

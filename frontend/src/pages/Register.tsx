@@ -31,7 +31,7 @@ const TIER_COLORS: Record<string, string> = {
 
 export default function Register() {
   const { primaryWallet } = useDynamicContext()
-  const { registerAgent } = useSuiTransaction()
+  const { registerAgent, createProfile } = useSuiTransaction()
   const [endpoint, setEndpoint] = useState('')
   const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -42,6 +42,18 @@ export default function Register() {
     setStatus(null)
     try {
       const digest = await registerAgent(endpoint)
+
+      // Create on-chain scoring profile (idempotent — ignore if already exists)
+      try {
+        await createProfile()
+      } catch {
+        // Profile likely already exists; non-fatal
+      }
+
+      // Refresh worker's agent registry cache so the cron picks up the new endpoint
+      const workerUrl = import.meta.env.VITE_WORKER_URL
+      if (workerUrl) fetch(`${workerUrl}/admin/sync-agents`, { method: 'POST' }).catch(() => {})
+
       setStatus({ type: 'success', msg: `Agent registered · Tx: ${digest.slice(0, 16)}…` })
     } catch (err) {
       setStatus({ type: 'error', msg: String(err) })

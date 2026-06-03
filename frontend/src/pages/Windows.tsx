@@ -60,12 +60,24 @@ function getPhase(w: WindowData): string {
 }
 
 async function fetchWindows(): Promise<WindowData[]> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE_ID}::window::WindowOpened` },
-    limit: 20,
-    order: 'descending',
-  })
-  return events.data.map(e => {
+  const [opened, resolved] = await Promise.all([
+    client.queryEvents({
+      query: { MoveEventType: `${PACKAGE_ID}::window::WindowOpened` },
+      limit: 20,
+      order: 'descending',
+    }),
+    client.queryEvents({
+      query: { MoveEventType: `${PACKAGE_ID}::window::WindowResolved` },
+      limit: 50,
+      order: 'descending',
+    }),
+  ])
+
+  const resolvedIds = new Set(
+    resolved.data.map(e => (e.parsedJson as { window_id: string }).window_id)
+  )
+
+  return opened.data.map(e => {
     const f = e.parsedJson as { window_id: string; opens_at: string; closes_at: string; resolves_at: string }
     return {
       id:          f.window_id,
@@ -73,7 +85,7 @@ async function fetchWindows(): Promise<WindowData[]> {
       closesAt:    Number(f.closes_at),
       resolvesAt:  Number(f.resolves_at),
       commitCount: 0,
-      resolved:    false,
+      resolved:    resolvedIds.has(f.window_id),
     }
   })
 }
@@ -83,6 +95,24 @@ export default function Windows() {
     queryKey: ['windows'],
     queryFn: fetchWindows,
     refetchInterval: 10_000,
+  })
+
+  const workerUrl = import.meta.env.VITE_WORKER_URL
+  const { data: commitCounts } = useQuery<Record<string, number>>({
+    queryKey: ['window-commits', windows?.map(w => w.id)],
+    queryFn: async () => {
+      const results = await Promise.all(
+        (windows ?? []).map(w =>
+          fetch(`${workerUrl}/window/${w.id}/stats`)
+            .then(r => r.json() as Promise<{ commitCount: number }>)
+            .then(s => [w.id, s.commitCount] as const)
+            .catch(() => [w.id, 0] as const)
+        )
+      )
+      return Object.fromEntries(results)
+    },
+    enabled: !!windows && !!workerUrl,
+    refetchInterval: 15_000,
   })
 
   return (
@@ -148,7 +178,7 @@ export default function Windows() {
                 {[
                   { label: 'Closes in', value: <Countdown target={w.closesAt} dim={phase !== 'deliberating'} /> },
                   { label: 'Resolves in', value: <Countdown target={w.resolvesAt} /> },
-                  { label: 'Commits', value: <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.875rem' }}>{w.commitCount}</span> },
+                  { label: 'Commits', value: <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.875rem' }}>{commitCounts?.[w.id] ?? w.commitCount}</span> },
                 ].map(stat => (
                   <div key={stat.label}>
                     <div style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' }}>
