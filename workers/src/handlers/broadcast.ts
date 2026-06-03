@@ -162,6 +162,10 @@ function validatePrediction(
     throw new Error(`window_id mismatch from agent ${agentAddress}`);
   }
 
+  if (p.agentAddress !== agentAddress) {
+    throw new Error(`agentAddress mismatch: expected ${agentAddress}, got ${p.agentAddress}`);
+  }
+
   // Probabilities must sum to 1 (within floating point tolerance)
   const sum = p.distribution.reduce((acc, b) => acc + b.probability, 0);
   if (Math.abs(sum - 1) > 0.01) {

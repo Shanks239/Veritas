@@ -69,10 +69,11 @@ export async function assembleFeedSnapshot(
 ): Promise<FeedSnapshot> {
   const address = keypair.toSuiAddress();
 
-  const [deepbook, coingeckoPrice] = await Promise.all([
-    fetchDeepbookSnapshot(client, address, env.SUI_NETWORK, env.COINGECKO_API_KEY),
-    fetchCoinGeckoPrice(env.COINGECKO_API_KEY),
-  ]);
+  // fetchDeepbookSnapshot already calls fetchCoinGeckoPrice internally and
+  // uses it as midPrice — reuse that result to avoid a second API call and
+  // ensure midPrice and coingeckoPrice are always consistent.
+  const deepbook = await fetchDeepbookSnapshot(client, address, env.SUI_NETWORK, env.COINGECKO_API_KEY);
+  const coingeckoPrice = deepbook.midPrice;
 
   const snapshot: Omit<FeedSnapshot, 'signature'> = {
     windowId,

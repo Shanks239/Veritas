@@ -41,7 +41,7 @@ export async function resolveAndScore(
 ): Promise<void> {
   // 1. Fetch outcome price
   const address      = keypair.toSuiAddress();
-  const outcomePrice = await fetchMidPrice(client, address, env.SUI_NETWORK);
+  const outcomePrice = await fetchMidPrice(client, address, env.SUI_NETWORK, env.COINGECKO_API_KEY);
 
   // 2. Resolve window on-chain
   await txResolveWindow(client, keypair, env, meta.windowId, outcomePrice);
@@ -82,7 +82,10 @@ async function scoreAgent(
   const record: CommitRecord = JSON.parse(commitRaw);
 
   // Compute score components
-  const entryPrice = meta.entryPrice ?? outcomePrice; // fallback if not stored
+  if (meta.entryPrice === undefined) {
+    console.error(`[resolve] window ${meta.windowId}: entryPrice not recorded — PnL and drawdown scores will be zeroed`);
+  }
+  const entryPrice = meta.entryPrice ?? outcomePrice;
   // Price samples during horizon — for hackathon, use only entry + outcome
   // Production: collect price samples from Deepbook throughout the horizon
   const priceSamples = [entryPrice, outcomePrice];

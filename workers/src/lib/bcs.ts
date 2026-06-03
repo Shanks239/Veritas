@@ -17,7 +17,6 @@ import { blake2b } from '@noble/hashes/blake2b';
 import type { AgentPrediction, PriceBucket, PredictionOrder } from '../types';
 
 const PROB_SCALE  = 1_000_000n;
-const PRICE_SCALE = 1_000_000n;
 
 // ── BCS primitives ────────────────────────────────────────────────────────────
 
@@ -56,18 +55,21 @@ function concat(...parts: Uint8Array[]): Uint8Array {
 // ── Struct encoders ───────────────────────────────────────────────────────────
 
 function encodeBucket(b: PriceBucket): Uint8Array {
+  // bucketLow/bucketHigh are already scaled 1e6 per PriceBucket type — do not re-scale.
+  // probability is [0,1] float — scale to u64 here.
   return concat(
-    u64LE(BigInt(Math.round(b.bucketLow   * Number(PRICE_SCALE)))),
-    u64LE(BigInt(Math.round(b.bucketHigh  * Number(PRICE_SCALE)))),
+    u64LE(BigInt(Math.round(b.bucketLow))),
+    u64LE(BigInt(Math.round(b.bucketHigh))),
     u64LE(BigInt(Math.round(b.probability * Number(PROB_SCALE)))),
   );
 }
 
 function encodeOrder(o: PredictionOrder): Uint8Array {
+  // sizeUsdc and limitPrice are already scaled 1e6 per PredictionOrder type — do not re-scale.
   return concat(
     u8(o.side === 'bid' ? 0 : 1),
-    u64LE(BigInt(Math.round(o.sizeUsdc   * Number(PRICE_SCALE)))),
-    u64LE(BigInt(Math.round(o.limitPrice * Number(PRICE_SCALE)))),
+    u64LE(BigInt(Math.round(o.sizeUsdc))),
+    u64LE(BigInt(Math.round(o.limitPrice))),
   );
 }
 

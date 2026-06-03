@@ -247,19 +247,23 @@ export async function txUpdateTier(
 
 /**
  * agent_profile::create(ctx) → profile ID
- * Creates a new AgentProfile for the given zkLogin address.
- * Called by Worker on first login.
+ * Creates a new AgentProfile. Called by Worker on first login.
  *
- * NOTE: In production the user submits this tx themselves with their
- * zkLogin signature. For hackathon, Worker submits using AdminCap.
- * The profile's zk_identity is set to the sender address in Move.
- * We impersonate the user address by using sponsored tx pattern.
+ * KNOWN LIMITATION: The Move contract uses ctx.sender() as the profile owner,
+ * so all profiles are currently owned by the Worker keypair, not the user's
+ * zkLogin address. agentAddress is passed here for call-site clarity but cannot
+ * be forwarded until the contract is updated to accept it as an explicit parameter.
+ * The KV mapping (agent:<agentAddress>:profile_id) is what ties a user to their
+ * profile for all Worker operations.
+ *
+ * Production fix: update Move contract to accept zk_identity: address as arg,
+ * or have the user submit this tx themselves with their zkLogin signature.
  */
 export async function txCreateProfile(
-  client:  SuiClient,
-  keypair: Ed25519Keypair,
-  env:     Env,
-  _agentAddress: string,   // zkLogin-derived address — stored in profile.zk_identity
+  client:        SuiClient,
+  keypair:       Ed25519Keypair,
+  env:           Env,
+  _agentAddress: string,   // zkLogin-derived address — cannot yet be used in Move call
 ): Promise<string> {
   const tx = new Transaction();
   tx.moveCall({

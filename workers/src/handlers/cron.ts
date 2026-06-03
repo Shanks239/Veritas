@@ -44,7 +44,10 @@ async function maybeOpenWindow(
   keypair: ReturnType<typeof buildKeypair>,
   env:     Env,
 ): Promise<void> {
-  // Distributed lock — prevents double-open if multiple Worker instances fire
+  // Best-effort distributed lock. KV has no atomic CAS, so two concurrent invocations
+  // can both read null and both proceed. Cloudflare Scheduled Events are delivered
+  // at-most-once per runtime isolate in practice, but for production correctness
+  // replace this with a Durable Object alarm which provides true single-execution.
   const lockKey   = 'window_open_lock';
   const existing  = await env.KV.get(lockKey);
   if (existing) return;
@@ -115,11 +118,9 @@ async function processWindow(
       // Broadcast + collect commits if deliberation is still open
       if (now < meta.closesAt) {
         await broadcastAndCommit(meta, client, keypair, env);
-      }
-
-      // Deliberation just closed — record entry price, advance phase
-      if (now >= meta.closesAt) {
-        const entryPrice = await fetchMidPrice(client, keypair.toSuiAddress(), env.SUI_NETWORK);
+      } else {
+        // Deliberation just closed — record entry price, advance phase
+        const entryPrice = await fetchMidPrice(client, keypair.toSuiAddress(), env.SUI_NETWORK, env.COINGECKO_API_KEY);
         meta.entryPrice  = entryPrice;
         meta.phase       = 'awaiting_horizon';
         await env.KV.put(KVKey.windowMeta(windowId), JSON.stringify(meta));
