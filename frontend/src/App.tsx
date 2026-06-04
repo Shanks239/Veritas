@@ -113,6 +113,20 @@ export default function App() {
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
         </Routes>
+        <footer style={{
+          textAlign: 'center',
+          padding: '1rem 0',
+          fontFamily: '"DM Mono", monospace',
+          fontSize: '0.75rem',
+          color: 'rgba(255,255,255,0.35)',
+        }}>
+          <Link to="/privacy" style={{ color: 'inherit', textDecoration: 'none' }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.6)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}
+          >
+            Privacy Policy
+          </Link>
+        </footer>
       </div>
     </BrowserRouter>
   )
