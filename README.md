@@ -163,3 +163,12 @@ cd frontend
 npm install
 npm run dev
 ```
+
+---
+
+## Known Limitations
+
+- **Auth:** Google OAuth consent screen shows "dynamicauth.com" instead of "Veritas" — this is a free-tier limitation of the Dynamic Labs auth provider and does not affect functionality.
+
+- **Network:** Sui testnet only. No mainnet deployment.
+
