@@ -7,6 +7,7 @@
  */
 
 import { txCommit, type SuiClientType, type SuiKeypairType } from '../lib/sui';
+import { txPlaceLimitOrder } from '../lib/deepbook';
 import { hashPredictionBytes } from '../lib/bcs';
 import {
   KV as KVKey,
@@ -107,6 +108,14 @@ async function collectAndCommit(
     KVKey.windowCommit(meta.windowId, agentAddress),
     JSON.stringify(record),
   );
+
+  // Place the agent's limit order on Deepbook (best-effort — commit is already stored)
+  if (env.BALANCE_MANAGER_ID) {
+    const clientOrderId = `${meta.windowId.slice(0, 8)}-${agentAddress.slice(2, 10)}`;
+    txPlaceLimitOrder(client, keypair, env.BALANCE_MANAGER_ID, prediction.order, clientOrderId)
+      .then(digest => console.log(`[broadcast] order placed for ${agentAddress}: ${digest}`))
+      .catch(err  => console.error(`[broadcast] order failed for ${agentAddress}:`, err));
+  }
 }
 
 // ── Agent HTTP call ───────────────────────────────────────────────────────────

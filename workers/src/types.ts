@@ -1,15 +1,16 @@
 // ── Environment ───────────────────────────────────────────────────────────────
 
 export interface Env {
-  KV:              KVNamespace;
-  SUI_NETWORK:     string;
-  PACKAGE_ID:      string;
-  MARKET_CONFIG_ID: string;
-  REGISTRY_ID:     string;
-  SUI_PRIVATE_KEY: string;   // secret
-  COINGECKO_API_KEY: string; // secret
-  SALT_SECRET:     string;   // secret — used for deterministic salt derivation
-  GOOGLE_CLIENT_ID: string;  // secret — Google OAuth app client ID
+  KV:                  KVNamespace;
+  SUI_NETWORK:         string;
+  PACKAGE_ID:          string;
+  MARKET_CONFIG_ID:    string;
+  REGISTRY_ID:         string;
+  BALANCE_MANAGER_ID:  string;   // Deepbook BalanceManager object ID — set after /admin/setup-deepbook
+  SUI_PRIVATE_KEY:     string;   // secret
+  COINGECKO_API_KEY:   string;   // secret
+  SALT_SECRET:         string;   // secret — used for deterministic salt derivation
+  GOOGLE_CLIENT_ID:    string;   // secret — Google OAuth app client ID
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────

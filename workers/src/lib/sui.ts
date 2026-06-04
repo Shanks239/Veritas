@@ -28,7 +28,7 @@ export function buildKeypair(env: Env): Ed25519Keypair {
   return Ed25519Keypair.fromSecretKey(raw);
 }
 
-async function signAndExecute(
+export async function signAndExecute(
   client:  SuiClient,
   keypair: Ed25519Keypair,
   tx:      Transaction,

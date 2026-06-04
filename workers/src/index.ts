@@ -9,8 +9,9 @@
  *   POST /admin/sync-agents     — refresh agent registry cache from Sui events
  */
 
-import { handleCron }                                       from './handlers/cron';
-import { buildClient, buildKeypair, txCreateProfile } from './lib/sui';
+import { handleCron }                                                 from './handlers/cron';
+import { buildClient, buildKeypair, txCreateProfile }           from './lib/sui';
+import { txCreateBalanceManager, txDepositToBalanceManager }    from './lib/deepbook';
 import { getLoginParams, getOrCreateSalt, deriveAddress, decodeJwtClaims } from './lib/zklogin';
 import type { Env }                                         from './types';
 
@@ -148,6 +149,31 @@ export default {
     if (url.pathname === '/admin/sync-agents' && request.method === 'POST') {
       ctx.waitUntil(syncAgentRegistry(env));
       return json({ status: 'syncing' });
+    }
+
+    // ── POST /admin/setup-deepbook ────────────────────────────────────────
+    // One-time: creates a shared BalanceManager for the Worker keypair.
+    // Returns its object ID — set it as BALANCE_MANAGER_ID in wrangler.toml and redeploy.
+    // Optional body: { deposit?: { coinKey: 'SUI' | 'DBUSDC', amount: number } }
+    if (url.pathname === '/admin/setup-deepbook' && request.method === 'POST') {
+      try {
+        const keypair          = buildKeypair(env);
+        const balanceManagerId = await txCreateBalanceManager(client, keypair);
+        console.log(`[setup] BalanceManager created: ${balanceManagerId}`);
+
+        const body = await request.json().catch(() => ({})) as { deposit?: { coinKey: string; amount: number } };
+        if (body.deposit) {
+          await txDepositToBalanceManager(client, keypair, balanceManagerId, body.deposit.coinKey, body.deposit.amount);
+          console.log(`[setup] deposited ${body.deposit.amount} ${body.deposit.coinKey}`);
+        }
+
+        return json({
+          balanceManagerId,
+          next: 'Set BALANCE_MANAGER_ID in wrangler.toml [vars] and redeploy',
+        });
+      } catch (err) {
+        return json({ error: String(err) }, 400);
+      }
     }
 
     return new Response('not found', { status: 404 });
