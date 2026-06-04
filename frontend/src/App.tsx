@@ -6,6 +6,8 @@ import Windows from './pages/Windows'
 import Profile from './pages/Profile'
 import Delegate from './pages/Delegate'
 import Register from './pages/Register'
+import Privacy from './pages/Privacy'
+import Terms from './pages/Terms'
 
 function Nav() {
   const { pathname } = useLocation()
@@ -108,6 +110,8 @@ export default function App() {
               <Register />
             </div>
           } />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
         </Routes>
       </div>
     </BrowserRouter>
