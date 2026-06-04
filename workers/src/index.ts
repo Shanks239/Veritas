@@ -52,6 +52,12 @@ export default {
       return Response.json({ status: 'ok', ts: Date.now() });
     }
 
+    // ── GET /admin/address ────────────────────────────────────────────────
+    if (url.pathname === '/admin/address' && request.method === 'GET') {
+      const keypair = buildKeypair(env);
+      return json({ address: keypair.toSuiAddress() });
+    }
+
     // ── GET /auth/params ──────────────────────────────────────────────────
     // Returns current epoch so frontend can construct the OAuth nonce.
     // Frontend: generateNonce(ephemeralPublicKey, maxEpoch, randomness)
