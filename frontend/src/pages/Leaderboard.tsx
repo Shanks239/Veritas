@@ -26,15 +26,24 @@ async function fetchAgents(): Promise<Agent[]> {
     limit: 50,
     order: 'descending',
   })
+
+  // Count total scored windows per profile (all events, not just latest)
+  const counts = new Map<string, number>()
+  for (const event of events.data) {
+    const id = (event.parsedJson as { profile_id: string }).profile_id
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+
+  // First event per profile is the most recent (descending order)
   const latest = new Map<string, Agent>()
   for (const event of events.data) {
     const f = event.parsedJson as { profile_id: string; composite_score: string; new_tier: number }
     if (!latest.has(f.profile_id)) {
       latest.set(f.profile_id, {
-        address:         f.profile_id,
-        compositeScore:  Number(f.composite_score) / 10_000,
-        tier:            f.new_tier,
-        windowsCompleted: 0,
+        address:          f.profile_id,
+        compositeScore:   Number(f.composite_score) / 10_000,
+        tier:             f.new_tier,
+        windowsCompleted: counts.get(f.profile_id) ?? 0,
       })
     }
   }

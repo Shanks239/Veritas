@@ -9,10 +9,10 @@
  *   POST /admin/sync-agents     — refresh agent registry cache from Sui events
  */
 
-import { handleCron }                            from './handlers/cron';
-import { buildClient, buildKeypair } from './lib/sui';
+import { handleCron }                                       from './handlers/cron';
+import { buildClient, buildKeypair, txCreateProfile } from './lib/sui';
 import { getLoginParams, getOrCreateSalt, deriveAddress, decodeJwtClaims } from './lib/zklogin';
-import type { Env }                              from './types';
+import type { Env }                                         from './types';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -102,7 +102,6 @@ export default {
 
         // Create AgentProfile on-chain
         const keypair = buildKeypair(env);
-        const { txCreateProfile } = await import('./lib/sui');
         const profileId = await txCreateProfile(client, keypair, env, address);
 
         // Cache profile ID
@@ -111,6 +110,28 @@ export default {
         return Response.json({ address, profileId, isNew: true });
       } catch (err) {
         return Response.json({ error: String(err) }, { status: 400 });
+      }
+    }
+
+    // ── POST /profile/ensure ─────────────────────────────────────────────
+    // Body: { agentAddress: string }
+    // Creates a Worker-owned AgentProfile if one is not already cached in KV.
+    // Worker must own the profile so it can call record_score/record_miss later.
+    if (url.pathname === '/profile/ensure' && request.method === 'POST') {
+      try {
+        const { agentAddress } = await request.json() as { agentAddress: string };
+        if (!agentAddress) return json({ error: 'agentAddress required' }, 400);
+
+        const existing = await env.KV.get(`agent:${agentAddress}:profile_id`);
+        if (existing) return json({ profileId: existing, isNew: false });
+
+        const keypair   = buildKeypair(env);
+        const profileId = await txCreateProfile(client, keypair, env, agentAddress);
+        await env.KV.put(`agent:${agentAddress}:profile_id`, profileId);
+
+        return json({ profileId, isNew: true });
+      } catch (err) {
+        return json({ error: String(err) }, 400);
       }
     }
 
@@ -152,8 +173,10 @@ async function syncAgentRegistry(env: Env): Promise<void> {
     const fields = event.parsedJson as { agent: string; endpoint: string } | undefined;
     if (!fields) continue;
     agents.push(fields.agent);
-    await env.KV.put(`agent:${fields.agent}:endpoint`, JSON.stringify(fields.endpoint));
-    console.log(`[sync] cached endpoint for ${fields.agent}`);
+    // Sui serializes vector<u8> as base64 in event parsedJson — decode to URL string
+    const endpoint = atob(fields.endpoint);
+    await env.KV.put(`agent:${fields.agent}:endpoint`, JSON.stringify(endpoint));
+    console.log(`[sync] cached endpoint for ${fields.agent}: ${endpoint}`);
   }
 
   await env.KV.put('agents:registered', JSON.stringify(agents));

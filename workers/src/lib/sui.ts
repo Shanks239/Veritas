@@ -168,12 +168,12 @@ export async function txReveal(
 }
 
 /**
- * agent_profile::record_score(profile, config, window_id, bundle)
- * Updates agent's composite score and tier. Requires agent to present their profile.
+ * scoring::verify_and_build → agent_profile::record_score
+ * Builds a validated ScoreBundle on-chain then records it on the profile.
+ * Two PTB steps: verify_and_build validates composite formula; record_score
+ * updates rolling score, history, and tier.
  *
- * NOTE: In production the agent signs this tx themselves (they own the profile).
- * For the hackathon the Worker submits using AdminCap access.
- * This is a known centralisation point flagged for production resolution.
+ * Profile must be owned by the Worker keypair (Worker calls this as the owner).
  */
 export async function txRecordScore(
   client:    SuiClient,
@@ -184,19 +184,28 @@ export async function txRecordScore(
   scores:    ScoreComponentsScaled,
 ): Promise<string> {
   const tx = new Transaction();
-  tx.moveCall({
-    target:    `${env.PACKAGE_ID}::agent_profile::record_score`,
+
+  const bundle = tx.moveCall({
+    target:    `${env.PACKAGE_ID}::scoring::verify_and_build`,
     arguments: [
-      tx.object(profileId),
       tx.object(env.MARKET_CONFIG_ID),
-      tx.pure.id(windowId),
-      // ScoreBundle fields inline — matches Move struct field order
       tx.pure.u64(BigInt(scores.brierScore)),
       tx.pure.u64(BigInt(scores.pnlNorm)),
       tx.pure.u64(BigInt(scores.drawdown)),
       tx.pure.u64(BigInt(scores.composite)),
     ],
   });
+
+  tx.moveCall({
+    target:    `${env.PACKAGE_ID}::agent_profile::record_score`,
+    arguments: [
+      tx.object(profileId),
+      tx.object(env.MARKET_CONFIG_ID),
+      tx.pure.id(windowId),
+      bundle,
+    ],
+  });
+
   return signAndExecute(client, keypair, tx);
 }
 

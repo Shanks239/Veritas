@@ -16,7 +16,8 @@ async function fetchRegisteredAgents(): Promise<RegisteredAgent[]> {
   })
   return events.data.map(e => {
     const f = e.parsedJson as { agent: string; endpoint: string }
-    return { agent: f.agent, endpoint: f.endpoint }
+    // Sui serializes vector<u8> as base64 in event parsedJson — decode to URL string
+    return { agent: f.agent, endpoint: atob(f.endpoint) }
   })
 }
 
