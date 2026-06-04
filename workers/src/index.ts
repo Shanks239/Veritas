@@ -52,12 +52,6 @@ export default {
       return Response.json({ status: 'ok', ts: Date.now() });
     }
 
-    // ── GET /admin/address ────────────────────────────────────────────────
-    if (url.pathname === '/admin/address' && request.method === 'GET') {
-      const keypair = buildKeypair(env);
-      return json({ address: keypair.toSuiAddress() });
-    }
-
     // ── GET /auth/params ──────────────────────────────────────────────────
     // Returns current epoch so frontend can construct the OAuth nonce.
     // Frontend: generateNonce(ephemeralPublicKey, maxEpoch, randomness)
@@ -155,6 +149,21 @@ export default {
     if (url.pathname === '/admin/sync-agents' && request.method === 'POST') {
       ctx.waitUntil(syncAgentRegistry(env));
       return json({ status: 'syncing' });
+    }
+
+    // ── POST /admin/deposit-deepbook ──────────────────────────────────────
+    // Deposit into the existing BalanceManager.
+    // Body: { coinKey: 'SUI' | 'DBUSDC', amount: number }
+    if (url.pathname === '/admin/deposit-deepbook' && request.method === 'POST') {
+      try {
+        if (!env.BALANCE_MANAGER_ID) return json({ error: 'BALANCE_MANAGER_ID not set' }, 400);
+        const { coinKey, amount } = await request.json() as { coinKey: string; amount: number };
+        const keypair = buildKeypair(env);
+        const digest  = await txDepositToBalanceManager(client, keypair, env.BALANCE_MANAGER_ID, coinKey, amount);
+        return json({ digest, coinKey, amount });
+      } catch (err) {
+        return json({ error: String(err) }, 400);
+      }
     }
 
     // ── POST /admin/setup-deepbook ────────────────────────────────────────
