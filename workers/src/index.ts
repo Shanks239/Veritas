@@ -296,6 +296,31 @@ export default {
       return json({ deleted: kvDeleteMatch[1] });
     }
 
+    // ── POST /admin/update-timing ─────────────────────────────────────────
+    // Update market config timing. Body: { adminCapId, deliberationSecs, horizonSecs, windowIntervalSecs }
+    if (url.pathname === '/admin/update-timing' && request.method === 'POST') {
+      try {
+        const body = await request.json() as {
+          adminCapId: string;
+          deliberationSecs: number;
+          horizonSecs: number;
+          windowIntervalSecs: number;
+        };
+        const keypair = buildKeypair(env);
+        const { txUpdateTiming } = await import('./lib/sui');
+        const digest = await txUpdateTiming(
+          client, keypair, env,
+          body.adminCapId,
+          BigInt(body.deliberationSecs),
+          BigInt(body.horizonSecs),
+          BigInt(body.windowIntervalSecs),
+        );
+        return json({ digest });
+      } catch (err) {
+        return json({ error: String(err) }, 400);
+      }
+    }
+
     return new Response('not found', { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

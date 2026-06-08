@@ -80,12 +80,6 @@ async function maybeOpenWindow(
     ]);
 
     console.log(`[cron] opened window ${windowId}`);
-
-    // Broadcast immediately — the active-window list is read concurrently so the
-    // new window won't appear in processActiveWindows until the NEXT tick, which
-    // arrives exactly at closesAt (60 s). Committing at T=0 is the only safe window.
-    await broadcastAndCommit(meta, client, keypair, env)
-      .catch(err => console.error('[cron] immediate broadcast failed:', err));
   } catch (err) {
     console.error('[cron] failed to open window:', err);
     await env.KV.delete(lockKey); // release lock on failure so next cron can retry

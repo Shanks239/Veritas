@@ -296,3 +296,30 @@ export async function txCreateProfile(
   }
   return created.objectId;
 }
+
+/**
+ * market_config::update_timing(admin_cap, config, deliberation_secs, horizon_secs, window_interval_secs)
+ * Updates window timing parameters. Requires AdminCap.
+ */
+export async function txUpdateTiming(
+  client:              SuiClient,
+  keypair:             Ed25519Keypair,
+  env:                 Env,
+  adminCapId:          string,
+  deliberationSecs:    bigint,
+  horizonSecs:         bigint,
+  windowIntervalSecs:  bigint,
+): Promise<string> {
+  const tx = new Transaction();
+  tx.moveCall({
+    target:    `${env.PACKAGE_ID}::market_config::update_timing`,
+    arguments: [
+      tx.object(adminCapId),
+      tx.object(env.MARKET_CONFIG_ID),
+      tx.pure.u64(deliberationSecs),
+      tx.pure.u64(horizonSecs),
+      tx.pure.u64(windowIntervalSecs),
+    ],
+  });
+  return signAndExecute(client, keypair, tx);
+}
