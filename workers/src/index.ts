@@ -215,6 +215,43 @@ export default {
       }
     }
 
+    // ── POST /admin/broadcast ─────────────────────────────────────────────
+    // Test the full broadcast→commit flow for a specific window.
+    // Body: { windowId: string }
+    if (url.pathname === '/admin/broadcast' && request.method === 'POST') {
+      try {
+        const { windowId } = await request.json() as { windowId: string };
+        if (!windowId) return json({ error: 'windowId required' }, 400);
+
+        const keypair = buildKeypair(env);
+        const { broadcastAndCommit } = await import('./handlers/broadcast');
+        const { assembleFeedSnapshot } = await import('./lib/feed');
+
+        // Check if feed exists in KV; if not, build one on the fly
+        let feedRaw = await env.KV.get(`window:${windowId}:feed`);
+        if (!feedRaw) {
+          const feed = await assembleFeedSnapshot(windowId, client, env, keypair);
+          feedRaw = JSON.stringify(feed);
+          await env.KV.put(`window:${windowId}:feed`, feedRaw);
+        }
+
+        // Build a minimal meta object so broadcastAndCommit can run
+        const now = Date.now();
+        const meta = {
+          windowId,
+          opensAt:    now - 5000,
+          closesAt:   now + 50000,
+          resolvesAt: now + 350000,
+          phase:      'deliberating' as const,
+        };
+
+        await broadcastAndCommit(meta, client, keypair, env);
+        return json({ ok: true, windowId });
+      } catch (err) {
+        return json({ error: String(err) }, 400);
+      }
+    }
+
     // ── DELETE /admin/kv/:key ─────────────────────────────────────────────
     // Delete a KV key by name (e.g. window_open_lock to unstick the cron).
     const kvDeleteMatch = url.pathname.match(/^\/admin\/kv\/(.+)$/);
