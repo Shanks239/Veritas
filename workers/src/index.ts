@@ -216,39 +216,75 @@ export default {
     }
 
     // ── POST /admin/broadcast ─────────────────────────────────────────────
-    // Test the full broadcast→commit flow for a specific window.
+    // Runs a single agent's full commit flow manually and returns step-by-step results.
     // Body: { windowId: string }
     if (url.pathname === '/admin/broadcast' && request.method === 'POST') {
+      const { windowId } = await request.json() as { windowId: string };
+      if (!windowId) return json({ error: 'windowId required' }, 400);
+
+      const keypair = buildKeypair(env);
+      const { fetchCoinGeckoPrice } = await import('./lib/feed');
+      const { txCommit } = await import('./lib/sui');
+      const { hashPredictionBytes } = await import('./lib/bcs');
+
+      const steps: Record<string, unknown> = {};
+
       try {
-        const { windowId } = await request.json() as { windowId: string };
-        if (!windowId) return json({ error: 'windowId required' }, 400);
+        // 1. Agents
+        const agentsRaw = await env.KV.get('agents:registered');
+        steps.agents = agentsRaw ? JSON.parse(agentsRaw) : [];
+        const agents = steps.agents as string[];
+        if (!agents.length) return json({ error: 'no agents registered', steps });
 
-        const keypair = buildKeypair(env);
-        const { broadcastAndCommit } = await import('./handlers/broadcast');
-        const { assembleFeedSnapshot } = await import('./lib/feed');
+        // 2. Endpoint
+        const agentAddress = agents[0];
+        const endpointRaw = await env.KV.get(`agent:${agentAddress}:endpoint`);
+        steps.endpointRaw = endpointRaw;
+        if (!endpointRaw) return json({ error: 'no endpoint cached', steps });
+        const endpoint = JSON.parse(endpointRaw) as string;
+        steps.endpoint = endpoint;
 
-        // Check if feed exists in KV; if not, build one on the fly
-        let feedRaw = await env.KV.get(`window:${windowId}:feed`);
-        if (!feedRaw) {
-          const feed = await assembleFeedSnapshot(windowId, client, env, keypair);
-          feedRaw = JSON.stringify(feed);
-          await env.KV.put(`window:${windowId}:feed`, feedRaw);
-        }
+        // 3. Price feed
+        const price = await fetchCoinGeckoPrice(env.COINGECKO_API_KEY);
+        steps.price = price;
 
-        // Build a minimal meta object so broadcastAndCommit can run
+        // 4. Build feed + payload
         const now = Date.now();
-        const meta = {
-          windowId,
-          opensAt:    now - 5000,
-          closesAt:   now + 50000,
-          resolvesAt: now + 350000,
-          phase:      'deliberating' as const,
+        const meta = { windowId, opensAt: now - 5000, closesAt: now + 50000, resolvesAt: now + 350000, phase: 'deliberating' as const };
+        const spread = Math.round(price * 0.001);
+        const feed = {
+          windowId, timestamp: now,
+          bids: [{ price: price - spread, qty: 1_000_000 }],
+          asks: [{ price: price + spread, qty: 1_000_000 }],
+          midPrice: price, coingeckoPrice: price, signature: '00',
+        };
+        const payload = {
+          window_id: windowId, opens_at: meta.opensAt, closes_at: meta.closesAt, resolves_at: meta.resolvesAt,
+          snapshot: { bids: feed.bids, asks: feed.asks, mid_price: feed.midPrice },
+          feeds: { coingecko_sui_usd: feed.coingeckoPrice, timestamp: now },
         };
 
-        await broadcastAndCommit(meta, client, keypair, env);
-        return json({ ok: true, windowId });
+        // 5. Call agent
+        const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15000) });
+        steps.agentStatus = res.status;
+        if (!res.ok) { steps.agentBody = await res.text(); return json({ error: 'agent error', steps }); }
+        const prediction = await res.json() as { windowId: string; agentAddress: string; distribution: unknown[]; order: unknown };
+        steps.prediction = prediction;
+
+        // 6. Validate
+        if (prediction.windowId !== windowId) return json({ error: `windowId mismatch: got ${prediction.windowId}`, steps });
+        if (prediction.agentAddress !== agentAddress) return json({ error: `agentAddress mismatch: got ${prediction.agentAddress} want ${agentAddress}`, steps });
+
+        // 7. Hash + commit
+        const hashBytes = hashPredictionBytes(prediction as Parameters<typeof hashPredictionBytes>[0]);
+        steps.hash = Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const commitId = await txCommit(client, keypair, env, windowId, hashBytes);
+        steps.commitId = commitId;
+
+        return json({ ok: true, steps });
       } catch (err) {
-        return json({ error: String(err) }, 400);
+        steps.error = String(err);
+        return json({ error: String(err), steps }, 400);
       }
     }
 
