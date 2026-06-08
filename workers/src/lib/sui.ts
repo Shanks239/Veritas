@@ -65,8 +65,9 @@ export async function txOpenWindow(
   });
   const digest = await signAndExecute(client, keypair, tx);
 
-  // Wait for RPC to index the transaction
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  // Poll until the tx is fully indexed so the Window shared object is
+  // resolvable by subsequent transactions (commit tx needs initialSharedVersion).
+  await client.waitForTransaction({ digest });
 
   // Extract created Window object ID from effects
   const result = await client.getTransactionBlock({
