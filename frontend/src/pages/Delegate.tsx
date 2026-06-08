@@ -15,8 +15,8 @@ async function fetchRegisteredAgents(): Promise<RegisteredAgent[]> {
     limit: 50, order: 'descending',
   })
   return events.data.map(e => {
-    const f = e.parsedJson as { agent: string; endpoint: string }
-    return { agent: f.agent, endpoint: atob(f.endpoint) }
+    const f = e.parsedJson as { agent: string; endpoint: number[] }
+    return { agent: f.agent, endpoint: new TextDecoder().decode(new Uint8Array(f.endpoint)) }
   })
 }
 

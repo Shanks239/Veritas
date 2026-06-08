@@ -16,22 +16,29 @@ export function useSuiTransaction() {
       throw new Error('No Sui wallet connected')
     }
 
-    // signTransaction calls _connector.connect() internally, which loads the
-    // accounts array for embedded wallets. signAndExecuteTransaction skips
-    // that step and throws "No account found" when accounts aren't loaded.
-    const { bytes, signature } = await primaryWallet.signTransaction(tx)
+    const account = await primaryWallet.getWalletAccount()
 
+    if (account) {
+      // Account already loaded — use signAndExecuteTransaction directly to
+      // avoid the destructive disconnect+reconnect that signTransaction triggers
+      // via _connector.connect() on embedded wallets.
+      const result = await primaryWallet.signAndExecuteTransaction({ transaction: tx })
+      return (result as { digest: string }).digest
+    }
+
+    // Account not yet loaded (first action after page load). signTransaction
+    // calls _connector.connect() which loads accounts for embedded wallets.
+    // After this one-time reconnect, subsequent calls take the fast path above.
+    const { bytes, signature } = await primaryWallet.signTransaction(tx)
     const client = new SuiClient({ url: getFullnodeUrl('testnet') })
     const result = await client.executeTransactionBlock({
       transactionBlock: bytes,
       signature,
       options: { showEffects: true },
     })
-
     if (result.effects?.status?.status !== 'success') {
       throw new Error(`Transaction failed: ${result.effects?.status?.error ?? 'unknown'}`)
     }
-
     return result.digest
   }
 
