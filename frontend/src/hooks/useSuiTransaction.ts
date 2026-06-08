@@ -71,6 +71,18 @@ export function useSuiTransaction() {
     return signAndExecute(tx)
   }
 
+  async function updateEndpoint(endpoint: string): Promise<string> {
+    const tx = new Transaction()
+    tx.moveCall({
+      target:    `${PACKAGE_ID}::registry::update_endpoint`,
+      arguments: [
+        tx.object(REGISTRY_ID),
+        tx.pure.vector('u8', Array.from(new TextEncoder().encode(endpoint))),
+      ],
+    })
+    return signAndExecute(tx)
+  }
+
   async function createProfile(): Promise<string> {
     const tx = new Transaction()
     tx.moveCall({
@@ -80,5 +92,5 @@ export function useSuiTransaction() {
     return signAndExecute(tx)
   }
 
-  return { registerAgent, delegateStake, createProfile, signAndExecute }
+  return { registerAgent, updateEndpoint, delegateStake, createProfile, signAndExecute }
 }
