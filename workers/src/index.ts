@@ -191,6 +191,38 @@ export default {
       }
     }
 
+    // ── GET /admin/kv-state ───────────────────────────────────────────────
+    // Returns cron-critical KV keys so we can see why windows aren't opening.
+    if (url.pathname === '/admin/kv-state' && request.method === 'GET') {
+      const [lock, active, agents] = await Promise.all([
+        env.KV.get('window_open_lock'),
+        env.KV.get('active_windows'),
+        env.KV.get('agents:registered'),
+      ]);
+      return json({ lock, active: active ? JSON.parse(active) : null, agents: agents ? JSON.parse(agents) : null });
+    }
+
+    // ── POST /admin/open-window ───────────────────────────────────────────
+    // Bypass the lock and try to open a window — returns digest or error.
+    if (url.pathname === '/admin/open-window' && request.method === 'POST') {
+      try {
+        const keypair  = buildKeypair(env);
+        const { txOpenWindow } = await import('./lib/sui');
+        const windowId = await txOpenWindow(client, keypair, env);
+        return json({ windowId });
+      } catch (err) {
+        return json({ error: String(err) }, 400);
+      }
+    }
+
+    // ── DELETE /admin/kv/:key ─────────────────────────────────────────────
+    // Delete a KV key by name (e.g. window_open_lock to unstick the cron).
+    const kvDeleteMatch = url.pathname.match(/^\/admin\/kv\/(.+)$/);
+    if (kvDeleteMatch && request.method === 'DELETE') {
+      await env.KV.delete(kvDeleteMatch[1]);
+      return json({ deleted: kvDeleteMatch[1] });
+    }
+
     return new Response('not found', { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
@@ -211,11 +243,11 @@ async function syncAgentRegistry(env: Env): Promise<void> {
 
   const agents: string[] = [];
   for (const event of events.data) {
-    const fields = event.parsedJson as { agent: string; endpoint: string } | undefined;
+    const fields = event.parsedJson as { agent: string; endpoint: number[] } | undefined;
     if (!fields) continue;
     agents.push(fields.agent);
-    // Sui serializes vector<u8> as base64 in event parsedJson — decode to URL string
-    const endpoint = atob(fields.endpoint);
+    // Sui serializes vector<u8> event fields as a number array in parsedJson
+    const endpoint = new TextDecoder().decode(new Uint8Array(fields.endpoint));
     await env.KV.put(`agent:${fields.agent}:endpoint`, JSON.stringify(endpoint));
     console.log(`[sync] cached endpoint for ${fields.agent}: ${endpoint}`);
   }
