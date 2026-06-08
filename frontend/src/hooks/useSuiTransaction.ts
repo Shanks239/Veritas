@@ -1,5 +1,6 @@
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core'
 import { isSuiWallet } from '@dynamic-labs/sui'
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 
 const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
@@ -15,11 +16,23 @@ export function useSuiTransaction() {
       throw new Error('No Sui wallet connected')
     }
 
-    const result = await primaryWallet.signAndExecuteTransaction({
-      transaction: tx,
+    // signTransaction calls _connector.connect() internally, which loads the
+    // accounts array for embedded wallets. signAndExecuteTransaction skips
+    // that step and throws "No account found" when accounts aren't loaded.
+    const { bytes, signature } = await primaryWallet.signTransaction(tx)
+
+    const client = new SuiClient({ url: getFullnodeUrl('testnet') })
+    const result = await client.executeTransactionBlock({
+      transactionBlock: bytes,
+      signature,
+      options: { showEffects: true },
     })
 
-    return (result as { digest: string }).digest
+    if (result.effects?.status?.status !== 'success') {
+      throw new Error(`Transaction failed: ${result.effects?.status?.error ?? 'unknown'}`)
+    }
+
+    return result.digest
   }
 
   async function registerAgent(endpoint: string): Promise<string> {
