@@ -136,6 +136,49 @@ export default {
       }
     }
 
+    // ── GET /agent/:address/activity ──────────────────────────────────────
+    // Returns the agent's recent commits with window context and scores.
+    const activityMatch = url.pathname.match(/^\/agent\/(0x[0-9a-fA-F]+)\/activity$/);
+    if (activityMatch && request.method === 'GET') {
+      const agent = activityMatch[1];
+      const { keys } = await env.KV.list({ prefix: 'window:' });
+      const commitKeys = keys
+        .map(k => k.name)
+        .filter(name => name.endsWith(`:commit:${agent}`));
+
+      const items = await Promise.all(commitKeys.map(async name => {
+        const windowId = name.split(':')[1];
+        const [commitRaw, metaRaw, scoreRaw] = await Promise.all([
+          env.KV.get(name),
+          env.KV.get(`window:${windowId}:meta`),
+          env.KV.get(`window:${windowId}:score:${agent}`),
+        ]);
+        if (!commitRaw) return null;
+        const commit = JSON.parse(commitRaw);
+        const meta   = metaRaw  ? JSON.parse(metaRaw)  : null;
+        const score  = scoreRaw ? JSON.parse(scoreRaw) : null;
+        return {
+          windowId,
+          commitId:   commit.commitId,
+          hash:       commit.hash,
+          prediction: commit.prediction,
+          opensAt:    meta?.opensAt    ?? null,
+          closesAt:   meta?.closesAt   ?? null,
+          resolvesAt: meta?.resolvesAt ?? null,
+          phase:      meta?.phase      ?? 'unknown',
+          entryPrice: meta?.entryPrice ?? null,
+          score,
+        };
+      }));
+
+      const activity = items
+        .filter((x): x is NonNullable<typeof x> => x !== null)
+        .sort((a, b) => (b.opensAt ?? 0) - (a.opensAt ?? 0))
+        .slice(0, 20);
+
+      return json({ agent, count: activity.length, activity });
+    }
+
     // ── GET /window/:windowId/stats ───────────────────────────────────────
     // Returns commit count for a window by listing KV keys with that prefix.
     const statsMatch = url.pathname.match(/^\/window\/([^/]+)\/stats$/);

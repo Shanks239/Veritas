@@ -106,6 +106,21 @@ async function scoreAgent(
     revealRef,
   );
 
+  // Store score record in KV so the dashboard can show results per window
+  await env.KV.put(
+    KVKey.windowScore(meta.windowId, agentAddress),
+    JSON.stringify({
+      brierScore:   scores.brierScore,
+      pnlNorm:      scores.pnlNorm,
+      drawdown:     scores.drawdown,
+      composite:    scores.composite,
+      entryPrice,
+      outcomePrice,
+      revealRef,
+      revealedAt:   Date.now(),
+    }),
+  );
+
   // Record score on-chain
   const profileId = await env.KV.get(`agent:${agentAddress}:profile_id`);
   if (!profileId) {

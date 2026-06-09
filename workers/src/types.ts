@@ -102,6 +102,7 @@ export const KV = {
   windowMeta:       (id: string)                  => `window:${id}:meta`,
   windowFeed:       (id: string)                  => `window:${id}:feed`,
   windowCommit:     (id: string, agent: string)   => `window:${id}:commit:${agent}`,
+  windowScore:      (id: string, agent: string)   => `window:${id}:score:${agent}`,
   windowAgents:     (id: string)                  => `window:${id}:agents`,
   agentEndpoint:    (addr: string)                => `agent:${addr}:endpoint`,
 } as const;

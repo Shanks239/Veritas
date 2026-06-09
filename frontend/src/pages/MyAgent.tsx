@@ -22,6 +22,38 @@ interface AgentData {
   delegators: { address: string; stake: number }[]
 }
 
+interface ActivityItem {
+  windowId: string
+  commitId: string
+  hash: string
+  prediction: {
+    distribution: { bucketLow: number; bucketHigh: number; probability: number }[]
+    order: { side: string; sizeUsdc: number; limitPrice: number }
+  }
+  opensAt: number | null
+  resolvesAt: number | null
+  phase: string
+  entryPrice: number | null
+  score: {
+    brierScore: number
+    pnlNorm: number
+    drawdown: number
+    composite: number
+    entryPrice: number
+    outcomePrice: number
+    revealRef: string
+  } | null
+}
+
+const PHASE_STYLE: Record<string, { color: string; text: string }> = {
+  deliberating:     { color: '#fbbf24', text: 'DELIBERATING' },
+  awaiting_horizon: { color: '#60a5fa', text: 'AWAITING HORIZON' },
+  resolvable:       { color: '#60a5fa', text: 'RESOLVING' },
+  resolved:         { color: '#34d399', text: 'RESOLVED' },
+}
+
+const usd = (scaled: number) => `$${(scaled / 1e6).toFixed(4)}`
+
 async function fetchMyAgentData(address: string): Promise<AgentData | null> {
   const [regEvents, delegEvents, undelegEvents] = await Promise.all([
     client.queryEvents({ query: { MoveEventType: `${PACKAGE_ID}::registry::AgentRegistered` }, limit: 50, order: 'descending' }),
@@ -69,6 +101,18 @@ export default function MyAgent() {
     queryFn: () => fetchMyAgentData(walletAddress!),
     enabled: !!walletAddress,
     refetchOnMount: 'always',
+  })
+
+  const workerUrl = import.meta.env.VITE_WORKER_URL
+  const { data: activity } = useQuery<ActivityItem[]>({
+    queryKey: ['my-agent-activity', walletAddress],
+    queryFn: async () => {
+      const res = await fetch(`${workerUrl}/agent/${walletAddress}/activity`)
+      const data = await res.json() as { activity: ActivityItem[] }
+      return data.activity
+    },
+    enabled: !!walletAddress && !!workerUrl,
+    refetchInterval: 15_000,
   })
 
   const [editing, setEditing] = useState(false)
@@ -303,6 +347,99 @@ export default function MyAgent() {
             fontFamily: '"DM Mono", monospace',
           }}>
             {updateStatus.msg}
+          </div>
+        )}
+      </div>
+
+      {/* Recent predictions */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <span style={label}>Recent Predictions ({activity?.length ?? 0})</span>
+        {!activity || activity.length === 0 ? (
+          <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.2)' }}>
+            No predictions yet — your agent commits automatically when windows open
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {activity.map(item => {
+              const phase = PHASE_STYLE[item.phase] ?? { color: 'rgba(255,255,255,0.35)', text: item.phase.toUpperCase() }
+              const topBucket = [...item.prediction.distribution].sort((a, b) => b.probability - a.probability)[0]
+              return (
+                <div key={item.windowId} style={{
+                  padding: '14px 16px',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  borderRadius: '10px',
+                  background: 'rgba(255,255,255,0.02)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <a
+                      href={`https://suiscan.xyz/testnet/object/${item.windowId}`}
+                      target="_blank" rel="noreferrer"
+                      style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.6)', textDecoration: 'none' }}
+                    >
+                      {item.windowId.slice(0, 10)}…{item.windowId.slice(-6)}
+                    </a>
+                    <span style={{
+                      fontSize: '0.625rem', letterSpacing: '0.08em', fontWeight: 600,
+                      color: phase.color, padding: '3px 8px', borderRadius: '4px',
+                      background: `${phase.color}14`, border: `1px solid ${phase.color}33`,
+                    }}>
+                      {phase.text}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', fontSize: '0.75rem' }}>
+                    <div>
+                      <div style={{ color: 'rgba(255,255,255,0.25)', marginBottom: '3px' }}>Top bucket</div>
+                      <div style={{ fontFamily: '"DM Mono", monospace', color: 'rgba(255,255,255,0.6)' }}>
+                        {topBucket ? `${usd(topBucket.bucketLow)}–${usd(topBucket.bucketHigh)} @ ${Math.round(topBucket.probability * 100)}%` : '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ color: 'rgba(255,255,255,0.25)', marginBottom: '3px' }}>Order</div>
+                      <div style={{ fontFamily: '"DM Mono", monospace', color: item.prediction.order.side === 'bid' ? '#34d399' : '#f87171' }}>
+                        {item.prediction.order.side.toUpperCase()} @ {usd(item.prediction.order.limitPrice)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ color: 'rgba(255,255,255,0.25)', marginBottom: '3px' }}>Committed</div>
+                      <a
+                        href={`https://suiscan.xyz/testnet/object/${item.commitId}`}
+                        target="_blank" rel="noreferrer"
+                        style={{ fontFamily: '"DM Mono", monospace', color: '#c084fc', textDecoration: 'none' }}
+                      >
+                        {item.commitId.slice(0, 10)}…
+                      </a>
+                    </div>
+                    {item.score && (
+                      <div>
+                        <div style={{ color: 'rgba(255,255,255,0.25)', marginBottom: '3px' }}>Score</div>
+                        <div style={{ fontFamily: '"DM Mono", monospace', color: '#c084fc' }}>
+                          {item.score.composite.toFixed(4)}
+                          <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: '6px' }}>
+                            {usd(item.score.entryPrice)}→{usd(item.score.outcomePrice)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {item.opensAt && (
+                    <div style={{ marginTop: '8px', fontSize: '0.6875rem', color: 'rgba(255,255,255,0.2)' }}>
+                      {new Date(item.opensAt).toLocaleString()}
+                      {item.score?.revealRef && (
+                        <a
+                          href={`https://aggregator.walrus-testnet.walrus.space/v1/blobs/${item.score.revealRef}`}
+                          target="_blank" rel="noreferrer"
+                          style={{ marginLeft: '10px', color: 'rgba(255,255,255,0.3)' }}
+                        >
+                          reveal data ↗
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
