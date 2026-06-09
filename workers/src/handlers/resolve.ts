@@ -22,7 +22,7 @@ import {
   type SuiKeypairType,
 } from '../lib/sui';
 import { fetchMidPrice }                from '../lib/feed';
-import { computeScores, scaleForChain } from '../lib/scoring';
+import { computeScores, computePnL, scaleForChain } from '../lib/scoring';
 import { encodeForCommit }              from '../lib/bcs';
 import {
   KV as KVKey,
@@ -106,7 +106,10 @@ async function scoreAgent(
     revealRef,
   );
 
-  // Store score record in KV so the dashboard can show results per window
+  // Store score record in KV so the dashboard can show results per window.
+  // pnlUsd is the paper-trading PnL of the agent's order in dollars
+  // (sizeUsdc and prices are 1e6-scaled, so the ratio leaves a 1e6-scaled USD value).
+  const pnlUsd = computePnL(record.prediction, entryPrice, outcomePrice) / 1e6;
   await env.KV.put(
     KVKey.windowScore(meta.windowId, agentAddress),
     JSON.stringify({
@@ -114,6 +117,7 @@ async function scoreAgent(
       pnlNorm:      scores.pnlNorm,
       drawdown:     scores.drawdown,
       composite:    scores.composite,
+      pnlUsd,
       entryPrice,
       outcomePrice,
       revealRef,

@@ -136,6 +136,31 @@ export default {
       }
     }
 
+    // ── GET /agent/:address/profile ───────────────────────────────────────
+    // Returns the agent's on-chain AgentProfile state (score, tier, history).
+    const profileMatch = url.pathname.match(/^\/agent\/(0x[0-9a-fA-F]+)\/profile$/);
+    if (profileMatch && request.method === 'GET') {
+      const agent     = profileMatch[1];
+      const profileId = await env.KV.get(`agent:${agent}:profile_id`);
+      if (!profileId) return json({ error: 'no profile for agent' }, 404);
+
+      const obj = await client.getObject({ id: profileId, options: { showContent: true } });
+      if (obj.data?.content?.dataType !== 'moveObject') {
+        return json({ error: 'profile object not found on-chain' }, 404);
+      }
+      const f = obj.data.content.fields as Record<string, unknown>;
+      return json({
+        profileId,
+        compositeScore:    Number(f.composite_score),
+        windowsCompleted:  Number(f.windows_completed),
+        windowsAvailable:  Number(f.windows_available),
+        consecutiveMissed: Number(f.consecutive_missed),
+        scoreHistory:      (f.score_history as string[]).map(Number),
+        tier:              Number(f.tier),
+        reputationFlag:    Boolean(f.reputation_flag),
+      });
+    }
+
     // ── GET /agent/:address/activity ──────────────────────────────────────
     // Returns the agent's recent commits with window context and scores.
     const activityMatch = url.pathname.match(/^\/agent\/(0x[0-9a-fA-F]+)\/activity$/);
