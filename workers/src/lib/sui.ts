@@ -5,7 +5,7 @@
 
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Ed25519Keypair }            from '@mysten/sui/keypairs/ed25519';
-import { Transaction }               from '@mysten/sui/transactions';
+import { Transaction, TransactionDataBuilder } from '@mysten/sui/transactions';
 import type { Env, ScoreComponentsScaled } from '../types';
 
 export type SuiClientType  = SuiClient;
@@ -32,16 +32,55 @@ export async function signAndExecute(
   client:  SuiClient,
   keypair: Ed25519Keypair,
   tx:      Transaction,
+  attempts = 5,
 ): Promise<string> {
-  const result = await client.signAndExecuteTransaction({
-    signer:      keypair,
-    transaction: tx,
-    options:     { showEffects: true, showObjectChanges: true },
-  });
-  if (result.effects?.status.status !== 'success') {
-    throw new Error(`Tx failed: ${JSON.stringify(result.effects?.status)}`);
+  // fullnode.testnet.sui.io is load-balanced and nodes lag each other, which
+  // produces "Could not find the referenced transaction" in two flavors:
+  //   1. Before execution — the receiving node hasn't indexed the tx that last
+  //      mutated our gas coin. The tx was not executed; resubmitting is safe.
+  //   2. After execution — the tx landed on-chain but the reporting node can't
+  //      find it yet, so the RPC call errors even though the tx SUCCEEDED.
+  // We sign once (identical bytes are idempotent — no equivocation risk), and on
+  // every error first check whether our digest actually landed before retrying.
+  tx.setSenderIfNotSet(keypair.toSuiAddress());
+  const bytes  = await tx.build({ client });
+  const digest = TransactionDataBuilder.getDigestFromBytes(bytes);
+  const { signature } = await keypair.signTransaction(bytes);
+
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const result = await client.executeTransactionBlock({
+        transactionBlock: bytes,
+        signature,
+        options: { showEffects: true, showObjectChanges: true },
+      });
+      if (result.effects?.status.status !== 'success') {
+        throw new Error(`Tx failed: ${JSON.stringify(result.effects?.status)}`);
+      }
+      return result.digest;
+    } catch (err) {
+      const msg = String(err);
+      try {
+        const confirmed = await client.waitForTransaction({
+          digest,
+          options: { showEffects: true },
+          timeout: 15_000,
+        });
+        if (confirmed.effects?.status.status === 'success') return digest;
+      } catch {
+        // not found on-chain — genuinely not executed, fall through to retry
+      }
+      const retryable =
+        msg.includes('Could not find the referenced transaction') ||
+        msg.includes('not available for consumption') ||
+        msg.includes('Error checking transaction input objects');
+      if (!retryable || i === attempts - 1) throw err;
+      lastErr = err;
+      await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+    }
   }
-  return result.digest;
+  throw lastErr;
 }
 
 // ── Transaction builders ──────────────────────────────────────────────────────
@@ -68,12 +107,10 @@ export async function txOpenWindow(
   });
   const digest = await signAndExecute(client, keypair, tx);
 
-  // Poll until the tx is fully indexed so the Window shared object is
-  // resolvable by subsequent transactions (commit tx needs initialSharedVersion).
-  await client.waitForTransaction({ digest });
-
-  // Extract created Window object ID from effects
-  const result = await client.getTransactionBlock({
+  // waitForTransaction polls until the tx is indexed on the responding node,
+  // then returns the response — avoids a separate getTransactionBlock that can
+  // hit an unsynced node and 404.
+  const result = await client.waitForTransaction({
     digest,
     options: { showObjectChanges: true },
   });
@@ -137,7 +174,7 @@ export async function txCommit(
   });
   const digest = await signAndExecute(client, keypair, tx);
 
-  const result = await client.getTransactionBlock({
+  const result = await client.waitForTransaction({
     digest,
     options: { showObjectChanges: true },
   });
@@ -316,7 +353,7 @@ export async function txCreateProfile(
   const digest = await signAndExecute(client, keypair, tx);
 
   // Extract created AgentProfile object ID from effects
-  const result = await client.getTransactionBlock({
+  const result = await client.waitForTransaction({
     digest,
     options: { showObjectChanges: true },
   });
