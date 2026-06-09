@@ -52,11 +52,17 @@ async function maybeOpenWindow(
   const existing  = await env.KV.get(lockKey);
   if (existing) return;
 
+  // Gate on window interval — without this, a window opens every cron tick,
+  // burning ~4.5 SUI/day in gas on testnet.
+  const intervalMs   = Number(await env.KV.get('config:window_interval_ms') ?? '600000');
+  const lastOpenedAt = Number(await env.KV.get('last_window_opened_at') ?? '0');
+  if (Date.now() - lastOpenedAt < intervalMs) return;
+
   await env.KV.put(lockKey, '1', { expirationTtl: WINDOW_OPEN_LOCK_TTL });
 
   try {
-    const windowId = await txOpenWindow(client, keypair, env);
-    const now      = Date.now();
+    const { windowId, initialSharedVersion } = await txOpenWindow(client, keypair, env);
+    const now = Date.now();
 
     // Read timing params from KV cache (populated at deploy, refreshed on config update)
     const deliberationMs = Number(await env.KV.get('config:deliberation_ms') ?? '60000');
@@ -68,6 +74,7 @@ async function maybeOpenWindow(
       closesAt:   now + deliberationMs,
       resolvesAt: now + deliberationMs + horizonMs,
       phase:      'deliberating',
+      initialSharedVersion,
     };
 
     // Fetch and store feed snapshot immediately (agents need t=0 state)
@@ -76,6 +83,7 @@ async function maybeOpenWindow(
     await Promise.all([
       env.KV.put(KVKey.windowMeta(windowId), JSON.stringify(meta)),
       env.KV.put(KVKey.windowFeed(windowId), JSON.stringify(feed)),
+      env.KV.put('last_window_opened_at', String(now)),
       addToActiveWindows(env, windowId),
     ]);
 

@@ -208,8 +208,8 @@ export default {
       try {
         const keypair  = buildKeypair(env);
         const { txOpenWindow } = await import('./lib/sui');
-        const windowId = await txOpenWindow(client, keypair, env);
-        return json({ windowId });
+        const { windowId, initialSharedVersion } = await txOpenWindow(client, keypair, env);
+        return json({ windowId, initialSharedVersion });
       } catch (err) {
         return json({ error: String(err) }, 400);
       }
@@ -219,7 +219,7 @@ export default {
     // Runs a single agent's full commit flow manually and returns step-by-step results.
     // Body: { windowId: string }
     if (url.pathname === '/admin/broadcast' && request.method === 'POST') {
-      const { windowId } = await request.json() as { windowId: string };
+      const { windowId, initialSharedVersion } = await request.json() as { windowId: string; initialSharedVersion?: string };
       if (!windowId) return json({ error: 'windowId required' }, 400);
 
       const keypair = buildKeypair(env);
@@ -278,7 +278,7 @@ export default {
         // 7. Hash + commit
         const hashBytes = hashPredictionBytes(prediction as Parameters<typeof hashPredictionBytes>[0]);
         steps.hash = Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-        const commitId = await txCommit(client, keypair, env, windowId, hashBytes);
+        const commitId = await txCommit(client, keypair, env, windowId, hashBytes, initialSharedVersion);
         steps.commitId = commitId;
 
         return json({ ok: true, steps });

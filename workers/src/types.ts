@@ -24,6 +24,7 @@ export interface WindowMeta {
   resolvesAt:  number;
   phase:       WindowPhase;
   entryPrice?: number;   // Deepbook mid at closesAt, scaled 1e6
+  initialSharedVersion?: string; // shared version for tx.sharedObjectRef in commit
 }
 
 // ── Feed ──────────────────────────────────────────────────────────────────────

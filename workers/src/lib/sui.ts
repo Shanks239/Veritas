@@ -47,14 +47,17 @@ export async function signAndExecute(
 // ── Transaction builders ──────────────────────────────────────────────────────
 
 /**
- * window::open(config, clock) → window ID
- * Opens a new prediction window. Returns the created Window object ID.
+ * window::open(config, clock) → window ID + initial shared version
+ * Opens a new prediction window. Returns the created Window object ID and its
+ * initialSharedVersion so later transactions can reference it with
+ * tx.sharedObjectRef() — bypassing fullnode object resolution, which fails
+ * when the load-balanced RPC routes to a node that hasn't indexed this tx yet.
  */
 export async function txOpenWindow(
   client:  SuiClient,
   keypair: Ed25519Keypair,
   env:     Env,
-): Promise<string> {
+): Promise<{ windowId: string; initialSharedVersion: string }> {
   const tx = new Transaction();
   tx.moveCall({
     target:    `${env.PACKAGE_ID}::window::open`,
@@ -80,7 +83,31 @@ export async function txOpenWindow(
   if (!created || created.type !== 'created') {
     throw new Error('Window object not found in tx effects');
   }
-  return created.objectId;
+
+  const owner = created.owner as { Shared?: { initial_shared_version: number | string } };
+  if (!owner?.Shared) {
+    throw new Error('Window object is not shared — cannot extract initialSharedVersion');
+  }
+  return {
+    windowId:             created.objectId,
+    initialSharedVersion: String(owner.Shared.initial_shared_version),
+  };
+}
+
+/**
+ * Looks up a shared object's initial shared version via getObject.
+ * Fallback for windows whose KV meta predates initialSharedVersion tracking.
+ */
+export async function getInitialSharedVersion(
+  client:   SuiClient,
+  objectId: string,
+): Promise<string> {
+  const res   = await client.getObject({ id: objectId, options: { showOwner: true } });
+  const owner = res.data?.owner as { Shared?: { initial_shared_version: number | string } } | null;
+  if (!owner?.Shared) {
+    throw new Error(`Object ${objectId} is not a shared object (owner: ${JSON.stringify(owner)})`);
+  }
+  return String(owner.Shared.initial_shared_version);
 }
 
 /**
@@ -93,12 +120,17 @@ export async function txCommit(
   env:       Env,
   windowId:  string,
   hashBytes: Uint8Array,
+  initialSharedVersion?: string,
 ): Promise<string> {
+  // sharedObjectRef skips the fullnode's dynamic object resolution, which fails
+  // with "Could not find the referenced transaction" when the load-balanced RPC
+  // hits a node that hasn't indexed the window-creating tx yet.
+  const sharedVersion = initialSharedVersion ?? await getInitialSharedVersion(client, windowId);
   const tx = new Transaction();
   tx.moveCall({
     target:    `${env.PACKAGE_ID}::commit::commit`,
     arguments: [
-      tx.object(windowId),
+      tx.sharedObjectRef({ objectId: windowId, initialSharedVersion: sharedVersion, mutable: true }),
       tx.object('0x6'),
       tx.pure.vector('u8', Array.from(hashBytes)),
     ],

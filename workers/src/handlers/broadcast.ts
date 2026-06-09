@@ -93,7 +93,7 @@ async function collectAndCommit(
   const hashBytes = hashPredictionBytes(prediction);
 
   // Submit commit transaction
-  const commitId = await txCommit(client, keypair, env, meta.windowId, hashBytes);
+  const commitId = await txCommit(client, keypair, env, meta.windowId, hashBytes, meta.initialSharedVersion);
 
   // Store commit record in KV for reveal phase
   const record: CommitRecord = {
