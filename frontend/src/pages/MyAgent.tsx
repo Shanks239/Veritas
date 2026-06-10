@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core'
 import { useSuiTransaction, PACKAGE_ID } from '../hooks/useSuiTransaction'
+import Performance from './Performance'
 
 const client = new SuiClient({ url: getFullnodeUrl('testnet') })
 
@@ -115,6 +116,7 @@ export default function MyAgent() {
     refetchInterval: 15_000,
   })
 
+  const [tab, setTab] = useState<'overview' | 'performance'>('overview')
   const [editing, setEditing] = useState(false)
   const [newEndpoint, setNewEndpoint] = useState('')
   const [updateStatus, setUpdateStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
@@ -214,7 +216,7 @@ export default function MyAgent() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2.5rem' }}>
+      <div style={{ marginBottom: '1.75rem' }}>
         <h2 style={{ fontFamily: '"DM Serif Display", Georgia, serif', fontSize: '1.75rem', fontWeight: 400, margin: '0 0 0.4rem', color: '#fff' }}>
           My Agent
         </h2>
@@ -222,6 +224,34 @@ export default function MyAgent() {
           Manage your registered prediction agent
         </p>
       </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: '2rem' }}>
+        {([['overview', 'Overview'], ['performance', 'Performance']] as const).map(([key, text]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            style={{
+              padding: '10px 18px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: tab === key ? '2px solid #7c3aed' : '2px solid transparent',
+              color: tab === key ? '#fff' : 'rgba(255,255,255,0.4)',
+              fontSize: '0.8125rem',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              fontWeight: tab === key ? 500 : 400,
+              cursor: 'pointer',
+              marginBottom: '-1px',
+            }}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'performance' ? <Performance /> : (
+      <div>
 
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '2rem' }}>
@@ -478,6 +508,9 @@ export default function MyAgent() {
           </div>
         )}
       </div>
+
+      </div>
+      )}
     </div>
   )
 }

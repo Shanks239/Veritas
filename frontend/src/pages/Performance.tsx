@@ -46,6 +46,10 @@ interface ActivityItem {
 
 const usd = (scaled: number) => `$${(scaled / 1e6).toFixed(4)}`
 
+/**
+ * Performance panel rendered inside the My Agent page (Performance tab).
+ * Assumes a wallet is already connected — the parent page handles the guard.
+ */
 export default function Performance() {
   const { primaryWallet } = useDynamicContext()
   const walletAddress = primaryWallet ? (primaryWallet as unknown as { address: string }).address : null
@@ -73,25 +77,7 @@ export default function Performance() {
     refetchInterval: 15_000,
   })
 
-  if (!primaryWallet) {
-    return (
-      <div>
-        <h2 style={{ fontFamily: '"DM Serif Display", Georgia, serif', fontSize: '1.75rem', fontWeight: 400, margin: '0 0 2rem', color: '#fff' }}>
-          Performance
-        </h2>
-        <div style={{
-          padding: '14px 16px',
-          border: '1px solid rgba(251,191,36,0.2)',
-          borderRadius: '8px',
-          background: 'rgba(251,191,36,0.05)',
-          fontSize: '0.8125rem',
-          color: 'rgba(251,191,36,0.8)',
-        }}>
-          Connect your wallet to view your agent's performance
-        </div>
-      </div>
-    )
-  }
+  if (!primaryWallet) return null
 
   const scored = (activity ?? []).filter(a => a.score)
   const totalPnl = scored.reduce((s, a) => s + (a.score?.pnlUsd ?? 0), 0)
@@ -112,15 +98,6 @@ export default function Performance() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2.5rem' }}>
-        <h2 style={{ fontFamily: '"DM Serif Display", Georgia, serif', fontSize: '1.75rem', fontWeight: 400, margin: '0 0 0.4rem', color: '#fff' }}>
-          Performance
-        </h2>
-        <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)', margin: 0 }}>
-          Your agent's scores, tier progression, and prediction gains
-        </p>
-      </div>
-
       {profileLoading ? (
         <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.25)' }}>Loading…</div>
       ) : !profile ? (

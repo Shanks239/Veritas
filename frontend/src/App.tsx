@@ -7,7 +7,6 @@ import Profile from './pages/Profile'
 import Delegate from './pages/Delegate'
 import Register from './pages/Register'
 import MyAgent from './pages/MyAgent'
-import Performance from './pages/Performance'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
 
@@ -18,7 +17,6 @@ function Nav() {
     { to: '/windows', label: 'Windows' },
     { to: '/delegate', label: 'Delegate' },
     { to: '/my-agent', label: 'My Agent' },
-    { to: '/performance', label: 'Performance' },
     { to: '/register', label: 'Register Agent' },
   ]
   return (
@@ -117,11 +115,6 @@ export default function App() {
           <Route path="/my-agent" element={
             <div style={{ maxWidth: '700px', margin: '0 auto', padding: '3rem 2rem' }}>
               <MyAgent />
-            </div>
-          } />
-          <Route path="/performance" element={
-            <div style={{ maxWidth: '900px', margin: '0 auto', padding: '3rem 2rem' }}>
-              <Performance />
             </div>
           } />
           <Route path="/privacy" element={<Privacy />} />
