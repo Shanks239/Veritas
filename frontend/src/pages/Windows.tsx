@@ -14,6 +14,13 @@ interface WindowData {
   resolved: boolean
 }
 
+interface CommitDetail {
+  agentAddress: string
+  commitId: string
+  hash: string
+  order: { side: string; sizeUsdc: number; limitPrice: number } | null
+}
+
 function Countdown({ target, dim }: { target: number; dim?: boolean }) {
   const [remaining, setRemaining] = useState(target - Date.now())
   useEffect(() => {
@@ -98,6 +105,8 @@ export default function Windows() {
   })
 
   const workerUrl = import.meta.env.VITE_WORKER_URL
+  const [expanded, setExpanded] = useState<string | null>(null)
+
   const { data: commitCounts } = useQuery<Record<string, number>>({
     queryKey: ['window-commits', windows?.map(w => w.id)],
     queryFn: async () => {
@@ -113,6 +122,18 @@ export default function Windows() {
     },
     enabled: !!windows && !!workerUrl,
     refetchInterval: 15_000,
+  })
+
+  // Lazy: only the expanded window's per-agent commit detail is fetched.
+  const { data: expandedCommits, isLoading: commitsLoading } = useQuery<CommitDetail[]>({
+    queryKey: ['window-commit-detail', expanded],
+    queryFn: async () => {
+      const r = await fetch(`${workerUrl}/window/${expanded}/commits`)
+      const j = await r.json() as { commits: CommitDetail[] }
+      return j.commits ?? []
+    },
+    enabled: !!expanded && !!workerUrl,
+    refetchInterval: 10_000,
   })
 
   return (
@@ -178,7 +199,6 @@ export default function Windows() {
                 {[
                   { label: 'Closes in', value: <Countdown target={w.closesAt} dim={phase !== 'deliberating'} /> },
                   { label: 'Resolves in', value: <Countdown target={w.resolvesAt} /> },
-                  { label: 'Commits', value: <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.875rem' }}>{commitCounts?.[w.id] ?? w.commitCount}</span> },
                 ].map(stat => (
                   <div key={stat.label}>
                     <div style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' }}>
@@ -187,7 +207,58 @@ export default function Windows() {
                     {stat.value}
                   </div>
                 ))}
+                {(() => {
+                  const count = commitCounts?.[w.id] ?? w.commitCount
+                  const isOpen = expanded === w.id
+                  return (
+                    <div>
+                      <div style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                        Commits
+                      </div>
+                      <button
+                        onClick={() => setExpanded(isOpen ? null : w.id)}
+                        disabled={count === 0}
+                        style={{
+                          background: 'none', border: 'none', padding: 0,
+                          fontFamily: '"DM Mono", monospace', fontSize: '0.875rem',
+                          color: count === 0 ? 'rgba(255,255,255,0.4)' : '#60a5fa',
+                          cursor: count === 0 ? 'default' : 'pointer',
+                          display: 'flex', alignItems: 'center', gap: '5px',
+                        }}
+                      >
+                        {count}
+                        {count > 0 && (
+                          <span style={{ fontSize: '0.7rem', transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▸</span>
+                        )}
+                      </button>
+                    </div>
+                  )
+                })()}
               </div>
+
+              {expanded === w.id && (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {commitsLoading && (
+                    <span style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.25)' }}>Loading commits…</span>
+                  )}
+                  {!commitsLoading && (expandedCommits?.length ?? 0) === 0 && (
+                    <span style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.25)' }}>No commits recorded yet.</span>
+                  )}
+                  {expandedCommits?.map(c => (
+                    <div key={c.agentAddress} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.7)' }}>
+                        {c.agentAddress.slice(0, 10)}…{c.agentAddress.slice(-6)}
+                      </span>
+                      {c.order && (
+                        <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.75rem' }}>
+                          <span style={{ color: c.order.side === 'bid' ? '#34d399' : '#f87171', textTransform: 'uppercase' }}>{c.order.side}</span>
+                          <span style={{ color: 'rgba(255,255,255,0.4)' }}> {(c.order.sizeUsdc / 1e6).toFixed(0)} USDC @ {(c.order.limitPrice / 1e6).toFixed(4)}</span>
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })}
