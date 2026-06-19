@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core'
 import { useSuiTransaction } from '../hooks/useSuiTransaction'
@@ -44,7 +45,9 @@ const quickBtn: React.CSSProperties = {
 export default function Delegate() {
   const { primaryWallet } = useDynamicContext()
   const { delegateStake } = useSuiTransaction()
-  const [selectedAgent, setSelectedAgent] = useState('')
+  const [searchParams] = useSearchParams()
+  // Pre-select the agent when arriving from a profile's "Delegate" button.
+  const [selectedAgent, setSelectedAgent] = useState(searchParams.get('agent') ?? '')
   const [amount, setAmount] = useState('')
   const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
   const [loading, setLoading] = useState(false)

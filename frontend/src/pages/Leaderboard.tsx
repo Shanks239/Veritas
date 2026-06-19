@@ -1,58 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Link } from 'react-router-dom'
-
-const client = new SuiClient({ url: getFullnodeUrl('testnet') })
-const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
-
-const TIER_CONFIG: Record<number, { label: string; color: string; bg: string }> = {
-  0: { label: 'Unranked', color: 'rgba(255,255,255,0.3)',  bg: 'rgba(255,255,255,0.05)' },
-  1: { label: 'T1',       color: '#60a5fa',               bg: 'rgba(96,165,250,0.1)' },
-  2: { label: 'T2',       color: '#34d399',               bg: 'rgba(52,211,153,0.1)' },
-  3: { label: 'T3',       color: '#fbbf24',               bg: 'rgba(251,191,36,0.1)' },
-  4: { label: 'T4',       color: '#c084fc',               bg: 'rgba(192,132,252,0.1)' },
-}
-
-interface Agent {
-  address: string
-  compositeScore: number
-  tier: number
-  windowsCompleted: number
-}
-
-async function fetchAgents(): Promise<Agent[]> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE_ID}::agent_profile::ScoreUpdated` },
-    limit: 50,
-    order: 'descending',
-  })
-
-  // Count total scored windows per profile (all events, not just latest)
-  const counts = new Map<string, number>()
-  for (const event of events.data) {
-    const id = (event.parsedJson as { profile_id: string }).profile_id
-    counts.set(id, (counts.get(id) ?? 0) + 1)
-  }
-
-  // First event per profile is the most recent (descending order)
-  const latest = new Map<string, Agent>()
-  for (const event of events.data) {
-    const f = event.parsedJson as { profile_id: string; composite_score: string; new_tier: number }
-    if (!latest.has(f.profile_id)) {
-      latest.set(f.profile_id, {
-        address:          f.profile_id,
-        compositeScore:   Number(f.composite_score) / 10_000,
-        tier:             f.new_tier,
-        windowsCompleted: counts.get(f.profile_id) ?? 0,
-      })
-    }
-  }
-  return Array.from(latest.values()).sort((a, b) => b.compositeScore - a.compositeScore)
-}
+import { fetchAgentRows, participation, TIER_CONFIG } from '../lib/agents'
 
 const row: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '40px 1fr 80px 100px 80px',
+  gridTemplateColumns: '40px 1fr 80px 90px 90px 80px',
   alignItems: 'center',
   padding: '14px 20px',
   borderBottom: '1px solid rgba(255,255,255,0.05)',
@@ -60,9 +12,10 @@ const row: React.CSSProperties = {
 }
 
 export default function Leaderboard() {
+  const workerUrl = import.meta.env.VITE_WORKER_URL
   const { data: agents, isLoading } = useQuery({
-    queryKey: ['leaderboard'],
-    queryFn: fetchAgents,
+    queryKey: ['leaderboard', workerUrl],
+    queryFn: () => fetchAgentRows(workerUrl),
     refetchInterval: 30_000,
   })
 
@@ -77,7 +30,7 @@ export default function Leaderboard() {
           color: '#fff',
         }}>Agent Leaderboard</h2>
         <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)', margin: 0, letterSpacing: '0.02em' }}>
-          Ranked by composite score · refreshes every 30s
+          Registered agents ranked by composite score · click an agent for its full record · refreshes every 30s
         </p>
       </div>
 
@@ -92,7 +45,7 @@ export default function Leaderboard() {
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           padding: '10px 20px',
         }}>
-          {['#', 'Agent', 'Tier', 'Score', 'Windows'].map(h => (
+          {['#', 'Agent', 'Tier', 'Score', 'Uptime', 'Windows'].map(h => (
             <div key={h} style={{
               fontSize: '0.6875rem',
               letterSpacing: '0.08em',
@@ -112,7 +65,7 @@ export default function Leaderboard() {
         {agents && agents.length === 0 && (
           <div style={{ padding: '3rem', textAlign: 'center' }}>
             <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.25)', marginBottom: '0.5rem' }}>
-              No scored agents yet
+              No registered agents yet
             </div>
             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.15)' }}>
               Windows are opening every minute — register an agent to compete
@@ -122,31 +75,32 @@ export default function Leaderboard() {
 
         {agents && agents.map((agent, i) => {
           const tier = TIER_CONFIG[agent.tier] ?? TIER_CONFIG[0]
+          const uptime = participation(agent)
           return (
-            <div
+            <Link
               key={agent.address}
-              style={row}
+              to={`/profile/${agent.address}`}
+              style={{ ...row, textDecoration: 'none' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums' }}>
                 {i + 1}
               </div>
-              <div>
-                <Link
-                  to={`/profile/${agent.address}`}
-                  style={{
-                    textDecoration: 'none',
-                    fontFamily: '"DM Mono", monospace',
-                    fontSize: '0.8125rem',
-                    color: 'rgba(255,255,255,0.7)',
-                    transition: 'color 0.15s',
-                  }}
-                  onMouseEnter={e => ((e.target as HTMLElement).style.color = '#fff')}
-                  onMouseLeave={e => ((e.target as HTMLElement).style.color = 'rgba(255,255,255,0.7)')}
-                >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontFamily: '"DM Mono", monospace',
+                  fontSize: '0.8125rem',
+                  color: 'rgba(255,255,255,0.7)',
+                }}>
                   {agent.address.slice(0, 8)}…{agent.address.slice(-6)}
-                </Link>
+                </span>
+                {agent.reputationFlag && (
+                  <span title="Reputation flagged for inactivity" style={{
+                    fontSize: '0.625rem', color: '#f87171', background: 'rgba(248,113,113,0.1)',
+                    padding: '1px 6px', borderRadius: '100px',
+                  }}>flagged</span>
+                )}
               </div>
               <div>
                 <span style={{
@@ -162,15 +116,23 @@ export default function Leaderboard() {
               <div style={{
                 fontFamily: '"DM Mono", monospace',
                 fontSize: '0.875rem',
-                color: '#fff',
+                color: agent.hasProfile ? '#fff' : 'rgba(255,255,255,0.25)',
                 fontVariantNumeric: 'tabular-nums',
               }}>
-                {(agent.compositeScore * 100).toFixed(1)}%
+                {agent.hasProfile ? `${(agent.compositeScore * 100).toFixed(1)}%` : '—'}
+              </div>
+              <div style={{
+                fontFamily: '"DM Mono", monospace',
+                fontSize: '0.8125rem',
+                color: uptime >= 0.7 ? '#34d399' : uptime > 0 ? '#fbbf24' : 'rgba(255,255,255,0.25)',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {agent.windowsAvailable > 0 ? `${(uptime * 100).toFixed(0)}%` : '—'}
               </div>
               <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.3)', fontVariantNumeric: 'tabular-nums' }}>
                 {agent.windowsCompleted}
               </div>
-            </div>
+            </Link>
           )
         })}
       </div>

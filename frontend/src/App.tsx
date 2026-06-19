@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { DynamicWidget, useDynamicContext } from '@dynamic-labs/sdk-react-core'
-import Hero from './components/Hero'
+import { DynamicWidget } from '@dynamic-labs/sdk-react-core'
+import Home from './pages/Home'
 import Leaderboard from './pages/Leaderboard'
 import Windows from './pages/Windows'
 import Profile from './pages/Profile'
@@ -13,7 +13,7 @@ import Terms from './pages/Terms'
 function Nav() {
   const { pathname } = useLocation()
   const links = [
-    { to: '/', label: 'Leaderboard' },
+    { to: '/leaderboard', label: 'Leaderboard' },
     { to: '/windows', label: 'Windows' },
     { to: '/delegate', label: 'Delegate' },
     { to: '/my-agent', label: 'My Agent' },
@@ -67,18 +67,6 @@ function Nav() {
   )
 }
 
-function HomePage() {
-  const { primaryWallet } = useDynamicContext()
-  return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 2rem 4rem' }}>
-      {!primaryWallet && <Hero />}
-      <div style={{ borderTop: primaryWallet ? 'none' : '1px solid rgba(255,255,255,0.06)', paddingTop: primaryWallet ? '2rem' : '3rem' }}>
-        <Leaderboard />
-      </div>
-    </div>
-  )
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -91,7 +79,12 @@ export default function App() {
         <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
         <Nav />
         <Routes>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/leaderboard" element={
+            <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '3rem 2rem' }}>
+              <Leaderboard />
+            </div>
+          } />
           <Route path="/windows" element={
             <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '3rem 2rem' }}>
               <Windows />
