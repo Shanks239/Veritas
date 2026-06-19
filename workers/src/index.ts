@@ -205,12 +205,38 @@ export default {
     }
 
     // ── GET /window/:windowId/stats ───────────────────────────────────────
-    // Returns commit count for a window by listing KV keys with that prefix.
+    // Returns commit count + the committing agent addresses (cheap — the
+    // addresses are the suffix of each commit key, no extra reads).
     const statsMatch = url.pathname.match(/^\/window\/([^/]+)\/stats$/);
     if (statsMatch && request.method === 'GET') {
       const windowId = statsMatch[1];
+      const { keys }  = await env.KV.list({ prefix: `window:${windowId}:commit:` });
+      const agents    = keys.map(k => k.name.split(':commit:')[1]);
+      return json({ commitCount: keys.length, agents });
+    }
+
+    // ── GET /window/:windowId/commits ─────────────────────────────────────
+    // Richer per-agent detail for one window (one KV read per committer) —
+    // fetched lazily by the UI when a window's commit list is expanded.
+    const commitsMatch = url.pathname.match(/^\/window\/([^/]+)\/commits$/);
+    if (commitsMatch && request.method === 'GET') {
+      const windowId = commitsMatch[1];
       const { keys } = await env.KV.list({ prefix: `window:${windowId}:commit:` });
-      return json({ commitCount: keys.length });
+      const commits = (await Promise.all(keys.map(async k => {
+        const raw = await env.KV.get(k.name);
+        if (!raw) return null;
+        const rec = JSON.parse(raw) as {
+          agentAddress: string; commitId: string; hash: string;
+          prediction?: { order?: { side: string; sizeUsdc: number; limitPrice: number } };
+        };
+        return {
+          agentAddress: rec.agentAddress,
+          commitId:     rec.commitId,
+          hash:         rec.hash,
+          order:        rec.prediction?.order ?? null,
+        };
+      }))).filter((c): c is NonNullable<typeof c> => c !== null);
+      return json({ windowId, commitCount: commits.length, commits });
     }
 
     // ── POST /admin/sync-agents ───────────────────────────────────────────

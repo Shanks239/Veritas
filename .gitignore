@@ -7,3 +7,5 @@ contracts/build/
 workers/.env
 *.local
 contracts/build/
+.wrangler/
+/package-lock.json

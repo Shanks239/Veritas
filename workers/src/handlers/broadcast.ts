@@ -16,6 +16,7 @@ import {
   type FeedSnapshot,
   type AgentPrediction,
   type CommitRecord,
+  type TickBudget,
 } from '../types';
 
 const AGENT_TIMEOUT_MS = 45_000; // deliberation_ms - 15s buffer
@@ -32,6 +33,7 @@ export async function broadcastAndCommit(
   client:  SuiClientType,
   keypair: SuiKeypairType,
   env:     Env,
+  budget:  TickBudget,
 ): Promise<void> {
   const [feedRaw, agentsRaw] = await Promise.all([
     env.KV.get(KVKey.windowFeed(meta.windowId)),
@@ -51,18 +53,40 @@ export async function broadcastAndCommit(
     await env.KV.put(KVKey.windowAgents(meta.windowId), JSON.stringify(agents));
   }
 
-  // Broadcast to all agents in parallel, respecting timeout
-  const results = await Promise.allSettled(
-    agents.map(agent => collectAndCommit(agent, meta, feed, client, keypair, env)),
-  );
+  // Commit at most `budget.remaining` agents this tick. Already-committed agents
+  // are skipped cheaply (no fetch/sign) and don't consume budget, so over the
+  // ~5 ticks of a deliberation window every agent gets a turn. Idempotent.
+  let committed = 0;
+  for (const agent of agents) {
+    if (budget.remaining <= 0) break;
+    let didWork: boolean;
+    try {
+      didWork = await collectAndCommit(agent, meta, feed, client, keypair, env);
+    } catch (err) {
+      // The fetch/hash/sign work already burned CPU — count it so we still
+      // respect the budget, and retry the agent on a later tick (idempotent).
+      console.error(`[broadcast] agent ${agent} failed:`, err);
+      didWork = true;
+    }
+    if (didWork) {
+      budget.remaining--;
+      committed++;
+    }
+  }
 
-  const succeeded = results.filter(r => r.status === 'fulfilled').length;
-  const failed    = results.filter(r => r.status === 'rejected').length;
-  console.log(`[broadcast] window ${meta.windowId}: ${succeeded} committed, ${failed} failed/skipped`);
+  if (committed > 0) console.log(`[broadcast] window ${meta.windowId}: committed ${committed} this tick`);
 }
 
 // ── Per-agent collection ──────────────────────────────────────────────────────
 
+/**
+ * Returns true only if it performed CPU-heavy work (hash + commit sign), so the
+ * caller decrements the per-tick budget. Cheap outcomes — already committed, no
+ * endpoint, or the agent being unreachable/returning bad data (which fail at the
+ * fetch, before any signing) — return false so a down agent doesn't starve the
+ * budget and block the others. A persistently-down agent simply gets a miss
+ * recorded at resolve time.
+ */
 async function collectAndCommit(
   agentAddress: string,
   meta:         WindowMeta,
@@ -70,24 +94,29 @@ async function collectAndCommit(
   client:       SuiClientType,
   keypair:      SuiKeypairType,
   env:          Env,
-): Promise<void> {
+): Promise<boolean> {
   // Skip if already committed this window
   const existingCommit = await env.KV.get(KVKey.windowCommit(meta.windowId, agentAddress));
-  if (existingCommit) return;
+  if (existingCommit) return false;
 
   const endpointRaw = await env.KV.get(KVKey.agentEndpoint(agentAddress));
   if (!endpointRaw) {
     console.warn(`[broadcast] no endpoint for agent ${agentAddress}`);
-    return;
+    return false;
   }
   const endpoint: string = JSON.parse(endpointRaw);
 
-  // POST input payload to agent
-  const inputPayload = buildInputPayload(meta, feed);
-  const prediction   = await fetchAgentPrediction(endpoint, inputPayload);
-
-  // Validate
-  validatePrediction(prediction, agentAddress, meta.windowId);
+  // Fetch + validate. These fail before any signing (≈0 CPU), so treat a
+  // failure as a cheap skip rather than spending the tick's commit budget.
+  let prediction: AgentPrediction;
+  try {
+    const inputPayload = buildInputPayload(meta, feed);
+    prediction = await fetchAgentPrediction(endpoint, inputPayload, env);
+    validatePrediction(prediction, agentAddress, meta.windowId);
+  } catch (err) {
+    console.warn(`[broadcast] agent ${agentAddress} unavailable/invalid:`, err);
+    return false;
+  }
 
   // Hash in BCS — this is what gets committed on-chain
   const hashBytes = hashPredictionBytes(prediction);
@@ -111,11 +140,17 @@ async function collectAndCommit(
 
   // Place the agent's limit order on Deepbook (best-effort — commit is already stored)
   if (env.BALANCE_MANAGER_ID) {
-    const clientOrderId = `${meta.windowId.slice(0, 8)}-${agentAddress.slice(2, 10)}`;
+    // Deepbook parses clientOrderId as a u64, so it must be a numeric string —
+    // derive a deterministic one from the window + agent (XOR of 48-bit slices).
+    const clientOrderId = (
+      BigInt('0x' + meta.windowId.slice(2, 14)) ^ BigInt('0x' + agentAddress.slice(2, 14))
+    ).toString();
     txPlaceLimitOrder(client, keypair, env.BALANCE_MANAGER_ID, prediction.order, clientOrderId)
       .then(digest => console.log(`[broadcast] order placed for ${agentAddress}: ${digest}`))
       .catch(err  => console.error(`[broadcast] order failed for ${agentAddress}:`, err));
   }
+
+  return true;
 }
 
 // ── Agent HTTP call ───────────────────────────────────────────────────────────
@@ -141,18 +176,30 @@ function buildInputPayload(meta: WindowMeta, feed: FeedSnapshot) {
 async function fetchAgentPrediction(
   endpoint:     string,
   inputPayload: object,
+  env:          Env,
 ): Promise<AgentPrediction> {
   const controller = new AbortController();
   const timer      = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
 
-  try {
-    const res = await fetch(endpoint, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(inputPayload),
-      signal:  controller.signal,
-    });
+  const init: RequestInit = {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(inputPayload),
+    signal:  controller.signal,
+  };
 
+  // Cloudflare blocks plain fetch() to another Worker on the same workers.dev
+  // zone (error 1042). When the endpoint is the agents Worker, route through the
+  // service binding, which is allowed and uses the URL's path for routing.
+  const sameZone = env.AGENTS_WORKER_HOST && (() => {
+    try { return new URL(endpoint).host === env.AGENTS_WORKER_HOST; } catch { return false; }
+  })();
+  const doFetch = sameZone && env.AGENTS_SVC
+    ? (e: string, i: RequestInit) => env.AGENTS_SVC!.fetch(e, i)
+    : (e: string, i: RequestInit) => fetch(e, i);
+
+  try {
+    const res = await doFetch(endpoint, init);
     if (!res.ok) throw new Error(`Agent returned ${res.status}`);
     return await res.json() as AgentPrediction;
   } finally {

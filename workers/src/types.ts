@@ -11,6 +11,23 @@ export interface Env {
   COINGECKO_API_KEY:   string;   // secret
   SALT_SECRET:         string;   // secret — used for deterministic salt derivation
   GOOGLE_CLIENT_ID:    string;   // secret — Google OAuth app client ID
+
+  // Service binding to the agents Worker + its host. Used to call agent
+  // /predict endpoints that live on the same workers.dev zone (plain fetch()
+  // between same-zone Workers is blocked with Cloudflare error 1042).
+  AGENTS_SVC?:         Fetcher;
+  AGENTS_WORKER_HOST?: string;
+}
+
+// ── Cron tick budget ────────────────────────────────────────────────────────
+
+/**
+ * Mutable per-cron-tick budget of CPU-heavy on-chain operations. Threaded
+ * through the open/broadcast/resolve paths so a single invocation stays under
+ * the Cloudflare CPU limit. Decrement once per operation that builds+signs a tx.
+ */
+export interface TickBudget {
+  remaining: number;
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -25,6 +42,13 @@ export interface WindowMeta {
   phase:       WindowPhase;
   entryPrice?: number;   // Deepbook mid at closesAt, scaled 1e6
   initialSharedVersion?: string; // shared version for tx.sharedObjectRef in commit
+
+  // Resolution is resumable across cron ticks to stay under the per-tick CPU
+  // budget (see handleCron). These track progress so a window can be resolved +
+  // scored a few agents at a time over successive ticks.
+  outcomePrice?:   number;    // Deepbook/CoinGecko mid at resolvesAt, scaled 1e6
+  resolvedOnChain?: boolean;  // window::resolve() has been submitted
+  scoredAgents?:   string[];  // agents whose score/miss has been recorded on-chain
 }
 
 // ── Feed ──────────────────────────────────────────────────────────────────────

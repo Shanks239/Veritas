@@ -96,7 +96,7 @@ export async function txOpenWindow(
   client:  SuiClient,
   keypair: Ed25519Keypair,
   env:     Env,
-): Promise<{ windowId: string; initialSharedVersion: string }> {
+): Promise<{ windowId: string; initialSharedVersion: string; opensAt: number; closesAt: number; resolvesAt: number }> {
   const tx = new Transaction();
   tx.moveCall({
     target:    `${env.PACKAGE_ID}::window::open`,
@@ -112,7 +112,7 @@ export async function txOpenWindow(
   // hit an unsynced node and 404.
   const result = await client.waitForTransaction({
     digest,
-    options: { showObjectChanges: true },
+    options: { showObjectChanges: true, showEvents: true },
   });
   const created = result.objectChanges?.find(
     c => c.type === 'created' && c.objectType?.includes('::window::Window'),
@@ -125,9 +125,23 @@ export async function txOpenWindow(
   if (!owner?.Shared) {
     throw new Error('Window object is not shared — cannot extract initialSharedVersion');
   }
+
+  // Use the contract's own timing (emitted in WindowOpened) so the off-chain
+  // phase schedule matches on-chain exactly. Computing it from KV config drifts:
+  // the contract derives closes_at/resolves_at from MarketConfig, and a mismatch
+  // makes the Worker call resolve() before the real horizon → E_HORIZON_NOT_ELAPSED.
+  const opened = result.events?.find(e => e.type.includes('::window::WindowOpened'));
+  const f = opened?.parsedJson as { opens_at: string; closes_at: string; resolves_at: string } | undefined;
+  if (!f) {
+    throw new Error('WindowOpened event not found — cannot determine on-chain timing');
+  }
+
   return {
     windowId:             created.objectId,
     initialSharedVersion: String(owner.Shared.initial_shared_version),
+    opensAt:    Number(f.opens_at),
+    closesAt:   Number(f.closes_at),
+    resolvesAt: Number(f.resolves_at),
   };
 }
 

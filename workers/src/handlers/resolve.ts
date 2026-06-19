@@ -29,33 +29,78 @@ import {
   type Env,
   type WindowMeta,
   type CommitRecord,
+  type TickBudget,
 } from '../types';
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+/**
+ * Resolve + score a window, resumable across cron ticks and bounded by `budget`.
+ * Each call spends at most `budget.remaining` operations (the on-chain resolve,
+ * then one agent's score/miss each), persisting progress in `meta` so the next
+ * tick continues where this one stopped. Returns true once the window is fully
+ * resolved and every agent has been scored or marked missed.
+ */
 export async function resolveAndScore(
   meta:    WindowMeta,
   client:  SuiClientType,
   keypair: SuiKeypairType,
   env:     Env,
-): Promise<void> {
-  // 1. Fetch outcome price
-  const address      = keypair.toSuiAddress();
-  const outcomePrice = await fetchMidPrice(client, address, env.SUI_NETWORK, env.COINGECKO_API_KEY);
+  budget:  TickBudget,
+): Promise<boolean> {
+  const address = keypair.toSuiAddress();
 
-  // 2. Resolve window on-chain
-  await txResolveWindow(client, keypair, env, meta.windowId, outcomePrice);
-  console.log(`[resolve] window ${meta.windowId} resolved at price ${outcomePrice}`);
+  // 1. Outcome price — fetched once (no tx), then cached in meta.
+  if (meta.outcomePrice === undefined) {
+    meta.outcomePrice = await fetchMidPrice(client, address, env.SUI_NETWORK, env.COINGECKO_API_KEY);
+    await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+  }
+  const outcomePrice = meta.outcomePrice;
 
-  // 3. Score all committed agents
+  // 2. Resolve window on-chain — once, costs one budget op.
+  if (!meta.resolvedOnChain) {
+    if (budget.remaining <= 0) return false;
+    budget.remaining--;
+    try {
+      await txResolveWindow(client, keypair, env, meta.windowId, outcomePrice);
+      console.log(`[resolve] window ${meta.windowId} resolved at price ${outcomePrice}`);
+    } catch (err) {
+      const m = String(err);
+      // E_ALREADY_RESOLVED (abort code 2): the window was resolved on-chain on
+      // an earlier run whose KV meta never advanced. Treat as done and score.
+      if (m.includes('Some("resolve")') && m.includes('}, 2)')) {
+        console.log(`[resolve] window ${meta.windowId} already resolved on-chain — proceeding to score`);
+      } else {
+        // Horizon not elapsed yet, or a transient RPC error — retry next tick.
+        console.warn(`[resolve] window ${meta.windowId} resolve deferred: ${m.slice(0, 140)}`);
+        return false;
+      }
+    }
+    meta.resolvedOnChain = true;
+    await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+  }
+
+  // 3. Score agents — a few per tick, tracking progress in meta.scoredAgents.
   const agentsRaw = await env.KV.get(KVKey.windowAgents(meta.windowId));
   const agents: string[] = agentsRaw ? JSON.parse(agentsRaw) : [];
+  const scored = new Set(meta.scoredAgents ?? []);
 
-  await Promise.allSettled(
-    agents.map(agent =>
-      scoreAgent(agent, meta, outcomePrice, client, keypair, env)
-    ),
-  );
+  for (const agent of agents) {
+    if (scored.has(agent)) continue;
+    if (budget.remaining <= 0) break;
+    budget.remaining--;
+    try {
+      await scoreAgent(agent, meta, outcomePrice, client, keypair, env);
+    } catch (err) {
+      // CPU already spent; mark done so we don't loop forever on one agent.
+      console.error(`[resolve] scoring ${agent} failed:`, err);
+    }
+    scored.add(agent);
+    meta.scoredAgents = [...scored];
+    await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+  }
+
+  return agents.every(a => scored.has(a));
 }
 
 // ── Per-agent scoring ─────────────────────────────────────────────────────────

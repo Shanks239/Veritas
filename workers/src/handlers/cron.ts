@@ -23,18 +23,29 @@ import { buildClient, buildKeypair, txOpenWindow } from '../lib/sui';
 import { assembleFeedSnapshot, fetchMidPrice }     from '../lib/feed';
 import { broadcastAndCommit }                      from './broadcast';
 import { resolveAndScore }                         from './resolve';
-import { KV as KVKey, type Env, type WindowMeta } from '../types';
+import { KV as KVKey, type Env, type WindowMeta, type TickBudget } from '../types';
 
 const WINDOW_OPEN_LOCK_TTL = 90; // seconds — prevents double-open on concurrent invocations
+
+// Per-cron-tick cap on CPU-heavy on-chain operations (each ≈ one or two
+// build+sign cycles). Tx building/signing dominates CPU, so we bound how much
+// runs per invocation instead of doing everything at once (which was hitting
+// exceededCpu). Sized to the agent roster: one deliberation tick commits all
+// agents, and the remaining ticks of the 300s window drain resolution/scoring
+// (resumable across ticks). Observed CPU per tick stays in the tens of ms.
+// Raise further on the Workers Paid plan (limits.cpu_ms up to 30000).
+const MAX_AGENT_OPS_PER_TICK = 4;
 
 export async function handleCron(env: Env): Promise<void> {
   const client  = buildClient(env);
   const keypair = buildKeypair(env);
 
-  await Promise.all([
-    maybeOpenWindow(client, keypair, env),
-    processActiveWindows(client, keypair, env),
-  ]);
+  // Shared budget for this invocation. Run sequentially (not Promise.all) so the
+  // two paths draw from the same budget without racing on the counter.
+  const budget: TickBudget = { remaining: MAX_AGENT_OPS_PER_TICK };
+
+  await maybeOpenWindow(client, keypair, env, budget);
+  await processActiveWindows(client, keypair, env, budget);
 }
 
 // ── Open new window ───────────────────────────────────────────────────────────
@@ -43,6 +54,7 @@ async function maybeOpenWindow(
   client:  ReturnType<typeof buildClient>,
   keypair: ReturnType<typeof buildKeypair>,
   env:     Env,
+  budget:  TickBudget,
 ): Promise<void> {
   // Best-effort distributed lock. KV has no atomic CAS, so two concurrent invocations
   // can both read null and both proceed. Cloudflare Scheduled Events are delivered
@@ -58,21 +70,25 @@ async function maybeOpenWindow(
   const lastOpenedAt = Number(await env.KV.get('last_window_opened_at') ?? '0');
   if (Date.now() - lastOpenedAt < intervalMs) return;
 
+  // Opening signs a tx (open) + the feed snapshot — defer to a later tick if this
+  // tick's CPU budget is already spent on commits/scoring.
+  if (budget.remaining <= 0) return;
+  budget.remaining--;
+
   await env.KV.put(lockKey, '1', { expirationTtl: WINDOW_OPEN_LOCK_TTL });
 
   try {
-    const { windowId, initialSharedVersion } = await txOpenWindow(client, keypair, env);
+    // Use the contract's own opens/closes/resolves timestamps (from the
+    // WindowOpened event) so off-chain phase transitions line up exactly with
+    // on-chain — otherwise resolve() can be called before the real horizon.
+    const { windowId, initialSharedVersion, opensAt, closesAt, resolvesAt } = await txOpenWindow(client, keypair, env);
     const now = Date.now();
-
-    // Read timing params from KV cache (populated at deploy, refreshed on config update)
-    const deliberationMs = Number(await env.KV.get('config:deliberation_ms') ?? '60000');
-    const horizonMs      = Number(await env.KV.get('config:horizon_ms')      ?? '300000');
 
     const meta: WindowMeta = {
       windowId,
-      opensAt:    now,
-      closesAt:   now + deliberationMs,
-      resolvesAt: now + deliberationMs + horizonMs,
+      opensAt,
+      closesAt,
+      resolvesAt,
       phase:      'deliberating',
       initialSharedVersion,
     };
@@ -100,65 +116,70 @@ async function processActiveWindows(
   client:  ReturnType<typeof buildClient>,
   keypair: ReturnType<typeof buildKeypair>,
   env:     Env,
+  budget:  TickBudget,
 ): Promise<void> {
   const activeIds = await getActiveWindows(env);
   const now       = Date.now();
 
-  await Promise.allSettled(
-    activeIds.map(id => processWindow(id, now, client, keypair, env)),
-  );
+  // Load metas once. Run sequentially so windows share the CPU budget.
+  const metas = (await Promise.all(activeIds.map(async id => {
+    const raw = await env.KV.get(KVKey.windowMeta(id));
+    return raw ? JSON.parse(raw) as WindowMeta : null;
+  }))).filter((m): m is WindowMeta => m !== null);
+
+  // Phase transitions are cheap (no tx) — always do them first so windows
+  // advance even when the budget is exhausted.
+  for (const meta of metas) {
+    await advancePhase(meta, now, client, keypair, env);
+  }
+
+  // Commits come before scoring: a missed commit means the agent misses the
+  // window (score decay), whereas a lagging resolution just records scores late.
+  for (const meta of metas) {
+    if (budget.remaining <= 0) break;
+    if (meta.phase === 'deliberating' && now < meta.closesAt) {
+      await broadcastAndCommit(meta, client, keypair, env, budget);
+    }
+  }
+
+  // Spend any remaining budget resolving + scoring (resumable across ticks).
+  for (const meta of metas) {
+    if (budget.remaining <= 0) break;
+    if (meta.phase === 'resolvable') {
+      const done = await resolveAndScore(meta, client, keypair, env, budget);
+      if (done) {
+        meta.phase = 'resolved';
+        await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+        await removeFromActiveWindows(env, meta.windowId);
+        console.log(`[cron] window ${meta.windowId} resolved and scored`);
+      }
+    }
+  }
 }
 
-async function processWindow(
-  windowId: string,
-  now:      number,
-  client:   ReturnType<typeof buildClient>,
-  keypair:  ReturnType<typeof buildKeypair>,
-  env:      Env,
+/**
+ * Cheap, no-transaction phase advancement: close deliberation (record entry
+ * price) and mark windows resolvable once the horizon elapses. Does not consume
+ * the tick budget.
+ */
+async function advancePhase(
+  meta:    WindowMeta,
+  now:     number,
+  client:  ReturnType<typeof buildClient>,
+  keypair: ReturnType<typeof buildKeypair>,
+  env:     Env,
 ): Promise<void> {
-  const raw = await env.KV.get(KVKey.windowMeta(windowId));
-  if (!raw) return;
-
-  const meta: WindowMeta = JSON.parse(raw);
-
-  switch (meta.phase) {
-    case 'deliberating': {
-      // Broadcast + collect commits if deliberation is still open
-      if (now < meta.closesAt) {
-        await broadcastAndCommit(meta, client, keypair, env);
-      } else {
-        // Deliberation just closed — record entry price, advance phase
-        const entryPrice = await fetchMidPrice(client, keypair.toSuiAddress(), env.SUI_NETWORK, env.COINGECKO_API_KEY);
-        meta.entryPrice  = entryPrice;
-        meta.phase       = 'awaiting_horizon';
-        await env.KV.put(KVKey.windowMeta(windowId), JSON.stringify(meta));
-        console.log(`[cron] window ${windowId} closed, entry price: ${entryPrice}`);
-      }
-      break;
-    }
-
-    case 'awaiting_horizon': {
-      // Nothing to do — just waiting for horizon to elapse
-      if (now >= meta.resolvesAt) {
-        meta.phase = 'resolvable';
-        await env.KV.put(KVKey.windowMeta(windowId), JSON.stringify(meta));
-      }
-      break;
-    }
-
-    case 'resolvable': {
-      await resolveAndScore(meta, client, keypair, env);
-      meta.phase = 'resolved';
-      await env.KV.put(KVKey.windowMeta(windowId), JSON.stringify(meta));
-      await removeFromActiveWindows(env, windowId);
-      console.log(`[cron] window ${windowId} resolved and scored`);
-      break;
-    }
-
-    case 'resolved':
-      // Already handled — should have been removed from active list
-      await removeFromActiveWindows(env, windowId);
-      break;
+  if (meta.phase === 'deliberating' && now >= meta.closesAt) {
+    const entryPrice = await fetchMidPrice(client, keypair.toSuiAddress(), env.SUI_NETWORK, env.COINGECKO_API_KEY);
+    meta.entryPrice  = entryPrice;
+    meta.phase       = 'awaiting_horizon';
+    await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+    console.log(`[cron] window ${meta.windowId} closed, entry price: ${entryPrice}`);
+  } else if (meta.phase === 'awaiting_horizon' && now >= meta.resolvesAt) {
+    meta.phase = 'resolvable';
+    await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+  } else if (meta.phase === 'resolved') {
+    await removeFromActiveWindows(env, meta.windowId);
   }
 }
 
