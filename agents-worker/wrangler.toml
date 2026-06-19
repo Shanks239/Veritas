@@ -1,0 +1,13 @@
+name = "veritas-agents"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# No cron, no KV, no secrets — this Worker only answers /predict requests.
+# Each agent's prediction is pure computation over the request payload.
+
+# Roster: name → { strategy, on-chain address }. Addresses are public.
+# Regenerate this block after `npm run setup -- gen` with:
+#   cd ../agent-test && npm run setup -- worker-config
+[vars]
+AGENTS = '{"imbalance":{"strategy":"imbalance","address":"0x540e6090e3c6e4b9095b768fbc9445471e74e4fe4bdcd2b0e4bc842f5b9038f2"},"momentum":{"strategy":"momentum","address":"0x83aefa800a314d97a4f1ac8466d5662a93d217a88d058754d9f688ebc2f15dca"},"reversion":{"strategy":"reversion","address":"0x0cf68ede919075fdfc4682cb3d161966a340b01e8e6e6be9d49399757c5a3678"},"wide":{"strategy":"wide","address":"0xda466f32a5f827b6c9ed0b52f9931063cc0c212dcc05909b4b0cb3f08d039167"}}'
