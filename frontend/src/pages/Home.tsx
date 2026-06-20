@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import Hero from '../components/Hero'
+import SessionBanner from '../components/SessionBanner'
+import LatestWindow from '../components/LatestWindow'
 import { fetchAgentRows, TIER_CONFIG } from '../lib/agents'
 
 const MEDALS = ['#fbbf24', '#cbd5e1', '#d97757']
@@ -95,6 +97,10 @@ export default function Home() {
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 2rem 4rem' }}>
       <Hero />
+      <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <SessionBanner />
+        <LatestWindow />
+      </div>
       <TopAgents />
     </div>
   )

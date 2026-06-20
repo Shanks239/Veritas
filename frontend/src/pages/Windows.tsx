@@ -1,137 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
-import { useEffect, useState } from 'react'
-import { isInSession, currentIntervalMs, nextSessionStart, fmtDuration } from '../lib/session'
-
-const client = new SuiClient({ url: getFullnodeUrl('testnet') })
-const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
-
-interface WindowData {
-  id: string
-  opensAt: number
-  closesAt: number
-  resolvesAt: number
-  commitCount: number
-  resolved: boolean
-}
+import { useState } from 'react'
+import { fetchWindows, getPhase, PHASES } from '../lib/windows'
+import Countdown from '../components/Countdown'
+import SessionBanner from '../components/SessionBanner'
 
 interface CommitDetail {
   agentAddress: string
   commitId: string
   hash: string
   order: { side: string; sizeUsdc: number; limitPrice: number } | null
-}
-
-function Countdown({ target, dim }: { target: number; dim?: boolean }) {
-  const [remaining, setRemaining] = useState(target - Date.now())
-  useEffect(() => {
-    const interval = setInterval(() => setRemaining(target - Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [target])
-
-  if (remaining <= 0) return (
-    <span style={{ color: 'rgba(255,255,255,0.2)', fontFamily: '"DM Mono", monospace', fontSize: '0.875rem' }}>
-      Elapsed
-    </span>
-  )
-
-  const secs  = Math.floor(remaining / 1000)
-  const mins  = Math.floor(secs / 60)
-  const hours = Math.floor(mins / 60)
-
-  return (
-    <span style={{
-      fontFamily: '"DM Mono", monospace',
-      fontSize: '0.875rem',
-      color: dim ? 'rgba(255,255,255,0.4)' : '#fff',
-    }}>
-      {hours > 0 && `${hours}h `}
-      {String(mins % 60).padStart(2, '0')}m{' '}
-      {String(secs % 60).padStart(2, '0')}s
-    </span>
-  )
-}
-
-function SessionBanner({ lastOpenedAt }: { lastOpenedAt: number }) {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    const i = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(i)
-  }, [])
-
-  const live         = isInSession(now)
-  const nextWindowAt = lastOpenedAt ? lastOpenedAt + currentIntervalMs(now) : now
-  const sessionAt    = nextSessionStart(now)
-  const accent       = live ? '#34d399' : '#fbbf24'
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px 16px',
-      padding: '12px 16px', marginBottom: '1.5rem',
-      border: `1px solid ${accent}22`, borderRadius: '10px', background: `${accent}0a`,
-    }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: accent, boxShadow: live ? `0 0 6px ${accent}` : 'none' }} />
-        <span style={{ fontSize: '0.75rem', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase', color: accent }}>
-          {live ? 'Session live' : 'Overnight · reduced cadence'}
-        </span>
-      </span>
-      <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.55)' }}>
-        Next window ~{fmtDuration(nextWindowAt - now)}
-      </span>
-      {!live && sessionAt && (
-        <span style={{ fontFamily: '"DM Mono", monospace', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)' }}>
-          · Full session resumes in {fmtDuration(sessionAt - now)}
-        </span>
-      )}
-    </div>
-  )
-}
-
-const PHASES: Record<string, { label: string; color: string; dot: string }> = {
-  deliberating:     { label: 'Deliberating',     color: '#60a5fa', dot: '#3b82f6' },
-  awaiting_horizon: { label: 'Awaiting horizon', color: '#fbbf24', dot: '#f59e0b' },
-  resolvable:       { label: 'Resolvable',       color: '#34d399', dot: '#10b981' },
-  resolved:         { label: 'Resolved',         color: 'rgba(255,255,255,0.2)', dot: 'rgba(255,255,255,0.15)' },
-}
-
-function getPhase(w: WindowData): string {
-  const now = Date.now()
-  if (now < w.closesAt)   return 'deliberating'
-  if (now < w.resolvesAt) return 'awaiting_horizon'
-  if (!w.resolved)        return 'resolvable'
-  return 'resolved'
-}
-
-async function fetchWindows(): Promise<WindowData[]> {
-  const [opened, resolved] = await Promise.all([
-    client.queryEvents({
-      query: { MoveEventType: `${PACKAGE_ID}::window::WindowOpened` },
-      limit: 20,
-      order: 'descending',
-    }),
-    client.queryEvents({
-      query: { MoveEventType: `${PACKAGE_ID}::window::WindowResolved` },
-      limit: 50,
-      order: 'descending',
-    }),
-  ])
-
-  const resolvedIds = new Set(
-    resolved.data.map(e => (e.parsedJson as { window_id: string }).window_id)
-  )
-
-  return opened.data.map(e => {
-    const f = e.parsedJson as { window_id: string; opens_at: string; closes_at: string; resolves_at: string }
-    return {
-      id:          f.window_id,
-      opensAt:     Number(f.opens_at),
-      closesAt:    Number(f.closes_at),
-      resolvesAt:  Number(f.resolves_at),
-      commitCount: 0,
-      resolved:    resolvedIds.has(f.window_id),
-    }
-  })
 }
 
 export default function Windows() {
@@ -188,7 +65,9 @@ export default function Windows() {
         </p>
       </div>
 
-      <SessionBanner lastOpenedAt={windows?.length ? Math.max(...windows.map(w => w.opensAt)) : 0} />
+      <div style={{ marginBottom: '1.5rem' }}>
+        <SessionBanner />
+      </div>
 
       {isLoading && (
         <div style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.875rem', padding: '2rem 0' }}>
