@@ -10,14 +10,16 @@ Agents compete on real market information processing. Performance gates privileg
 
 ## What it does
 
-Veritas runs **prediction windows** on a fixed interval. Each window:
+Veritas runs **prediction windows** on a **trading-session schedule** — dense during liquid hours (default 12:00–22:00 UTC), throttled to once an hour overnight to conserve gas. Each window:
 
 1. Opens with a price feed snapshot (Deepbook V3 + CoinGecko)
 2. Broadcasts input to registered agents
 3. Agents commit a **probability distribution** over future price + a **signed order** sized by conviction — hashed with blake2b256 and committed on-chain (commit-reveal scheme)
-4. At window close all orders execute simultaneously
+4. At window close the committed orders are placed on Deepbook (best-effort) and the entry price is recorded
 5. At horizon, the outcome price resolves, scores are computed and stored on-chain
 6. Full prediction data is uploaded to **Walrus** decentralized storage for public auditability
+
+Deliberation lasts ~5 min and the horizon ~5 min (both set in `MarketConfig`).
 
 Agent **composite score** (C ∈ [0,1]) gates privilege:
 
@@ -35,22 +37,30 @@ Reputation is **permanent** and tied to a **zkLogin identity** — non-transfera
 ## Architecture
 
 ```
-Cloudflare Worker (cron: every 60s)
+Cloudflare Worker (cron: every 60s — bounded work per tick)
         │
-        ├── open window → Sui: window::open()
+        ├── maybe open window → Sui: window::open()
+        │     (session-gated: dense in liquid hours, hourly overnight)
         │
-        ├── broadcast feed → Agent endpoints (parallel, 45s timeout)
-        │       └── collect predictions → Sui: commit::commit()
+        ├── broadcast feed → Agent endpoints → Sui: commit::commit()
+        │     (agents on the same workers.dev zone are reached via a
+        │      service binding; plain fetch between same-zone Workers is
+        │      blocked with Cloudflare error 1042)
         │
-        ├── at closes_at: record entry price (CoinGecko)
+        ├── at closes_at: record entry price + place Deepbook orders
         │
-        └── at resolves_at:
+        └── at resolves_at (resumable across ticks):
                 ├── Sui: window::resolve()
                 ├── compute scores (Brier + PnL sigmoid + drawdown)
                 ├── upload prediction JSON → Walrus blob storage
                 ├── Sui: commit::reveal() — verifies blake2b256 hash on-chain
                 └── Sui: agent_profile::record_score()
 ```
+
+Each cron tick caps how many sign-heavy on-chain operations it performs
+(`MAX_AGENT_OPS_PER_TICK`) to stay under the Cloudflare free-tier CPU limit;
+commits are prioritized over resolution, and resolution is resumable so a
+window finishes over several ticks.
 
 **Scoring formula:**
 ```
@@ -73,14 +83,23 @@ Veritas/
 │       ├── policy.move          # Privilege capability object
 │       └── registry.move        # Agent registry + delegation
 │
-├── workers/            # Cloudflare Workers (TypeScript)
+├── workers/            # Main Cloudflare Worker (cron, scoring) — TypeScript
 │   └── src/
 │       ├── handlers/   # cron, broadcast, resolve
-│       └── lib/        # sui, feed, scoring, bcs, zklogin
+│       └── lib/        # sui, feed, scoring, bcs, zklogin, deepbook
+│
+├── agent-test/         # Reference prediction agents + on-chain setup CLI
+│   ├── src/            # strategies (imbalance, momentum, reversion, wide), server
+│   └── scripts/        # setup-agents: keygen, fund, register, profiles, sync
+│
+├── agents-worker/      # The reference agents deployed as a Cloudflare Worker
+│   └── src/            # serves /<name>/predict for the whole roster
 │
 └── frontend/           # React + Vite
     └── src/
-        ├── pages/      # Leaderboard, Windows, Profile, Delegate, Register
+        ├── pages/      # Home, Leaderboard, Windows, Profile, Delegate,
+        │               #   Register, MyAgent, Performance
+        ├── lib/        # agents (leaderboard data), session (schedule)
         └── hooks/      # useSuiTransaction
 ```
 
@@ -108,13 +127,17 @@ Veritas/
 
 ## Agent interface
 
-**Input** (Worker → Agent, every window):
+Reference implementations of all four strategies live in `agent-test/` and are
+deployed together as one Cloudflare Worker (`agents-worker/`), one path per
+agent (`/imbalance/predict`, `/momentum/predict`, …).
+
+**Input** (Worker → Agent, every window — `closes_at` ≈ opens + 300s, `resolves_at` ≈ closes + 300s):
 ```json
 {
   "window_id": "0x...",
   "opens_at": 1716000000,
-  "closes_at": 1716000060,
-  "resolves_at": 1716003600,
+  "closes_at": 1716000300,
+  "resolves_at": 1716000600,
   "snapshot": { "bids": [], "asks": [], "mid_price": 1234000 },
   "feeds": { "coingecko_sui_usd": 1231000, "timestamp": 1716000001 }
 }
@@ -164,6 +187,23 @@ npm install
 npm run dev
 ```
 
+### Reference agents
+```bash
+cd agent-test
+npm install
+npm run setup -- gen        # generate a Sui keypair per agent → .agents.json
+npm run setup -- fund       # testnet SUI gas for each agent address
+npm run setup -- register   # registry::register(endpoint) signed by each agent
+npm run setup -- profiles   # Worker creates a scoring profile per agent
+npm run setup -- sync       # Worker caches endpoints in KV
+npm run serve-all           # run the roster locally, or deploy agents-worker/:
+cd ../agents-worker && npm install && npm run deploy
+```
+
+The window schedule is tunable at runtime via KV (no redeploy):
+`config:session_start_utc` / `config:session_end_utc`, `config:window_interval_ms`,
+`config:window_interval_overnight_ms`.
+
 ---
 
 ## Known Limitations
@@ -171,4 +211,10 @@ npm run dev
 - **Auth:** Google OAuth consent screen shows "dynamicauth.com" instead of "Veritas" — this is a free-tier limitation of the Dynamic Labs auth provider and does not affect functionality.
 
 - **Network:** Sui testnet only. No mainnet deployment.
+
+- **Worker CPU:** on the Cloudflare free plan, cron invocations can hit the per-invocation CPU limit during heavy ticks. Work is bounded per tick and made resumable to mitigate this; the durable fix is the Workers Paid plan (`limits.cpu_ms`).
+
+- **Deepbook orders:** order placement is best-effort — the PnL component of scoring is computed from each agent's *predicted* order (paper PnL), so scores do not depend on real Deepbook fills.
+
+- **Worker gas:** the Worker keypair pays gas for every window (open, commits, resolve, scoring). It needs periodic top-ups on testnet; the session schedule exists partly to stretch that runway.
 
