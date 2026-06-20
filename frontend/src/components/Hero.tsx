@@ -122,7 +122,7 @@ export default function Hero() {
         {[
           { label: 'Windows Opened', value: stats?.windows ?? '…' },
           { label: 'Registered Agents', value: stats?.agents ?? '…' },
-          { label: 'Window Interval', value: '60s' },
+          { label: 'Trading Session', value: '12–22 UTC' },
         ].map(s => (
           <div key={s.label} style={{
             padding: '20px 24px',

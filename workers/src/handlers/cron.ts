@@ -64,9 +64,10 @@ async function maybeOpenWindow(
   const existing  = await env.KV.get(lockKey);
   if (existing) return;
 
-  // Gate on window interval — without this, a window opens every cron tick,
-  // burning ~4.5 SUI/day in gas on testnet.
-  const intervalMs   = Number(await env.KV.get('config:window_interval_ms') ?? '600000');
+  // Session-aware interval: open at the normal cadence during the liquid trading
+  // session, and only once per hour overnight to conserve gas (crypto is quiet
+  // late-night/early-morning UTC). Resolution/scoring still runs every tick.
+  const intervalMs   = await currentWindowIntervalMs(env);
   const lastOpenedAt = Number(await env.KV.get('last_window_opened_at') ?? '0');
   if (Date.now() - lastOpenedAt < intervalMs) return;
 
@@ -108,6 +109,35 @@ async function maybeOpenWindow(
     console.error('[cron] failed to open window:', err);
     await env.KV.delete(lockKey); // release lock on failure so next cron can retry
   }
+}
+
+/**
+ * How long to wait between opening windows, depending on the trading session.
+ *
+ * During the liquid session (default 12:00–22:00 UTC, the US/EU overlap) windows
+ * open at the normal interval. Overnight they open just once per hour to conserve
+ * gas, since crypto is quiet and there's little market signal to score.
+ *
+ * KV overrides (all optional):
+ *   config:session_start_utc              session start hour, default 12
+ *   config:session_end_utc                session end hour,   default 22
+ *   config:window_interval_ms             in-session interval, default 600000 (10m)
+ *   config:window_interval_overnight_ms   overnight interval,  default 3600000 (1h)
+ * Set start == end to make every hour overnight (fully throttled).
+ */
+async function currentWindowIntervalMs(env: Env): Promise<number> {
+  const start   = Number((await env.KV.get('config:session_start_utc')) ?? '12');
+  const end     = Number((await env.KV.get('config:session_end_utc'))   ?? '22');
+  const dayMs   = Number((await env.KV.get('config:window_interval_ms')) ?? '600000');
+  const nightMs = Number((await env.KV.get('config:window_interval_overnight_ms')) ?? '3600000');
+
+  const hour = new Date().getUTCHours();
+  // Handles sessions that wrap past midnight (start > end).
+  const inSession = start <= end
+    ? (hour >= start && hour < end)
+    : (hour >= start || hour < end);
+
+  return inSession ? dayMs : nightMs;
 }
 
 // ── Process active windows ────────────────────────────────────────────────────

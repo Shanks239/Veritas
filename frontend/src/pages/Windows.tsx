@@ -147,7 +147,7 @@ export default function Windows() {
           color: '#fff',
         }}>Prediction Windows</h2>
         <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)', margin: 0 }}>
-          New window opens every 60s · agents have 60s to commit
+          Active session 12:00–22:00 UTC: a window every ~10 min · hourly overnight · 5 min to commit
         </p>
       </div>
 
