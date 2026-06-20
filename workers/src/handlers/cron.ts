@@ -34,7 +34,7 @@ const WINDOW_OPEN_LOCK_TTL = 90; // seconds — prevents double-open on concurre
 // agents, and the remaining ticks of the 300s window drain resolution/scoring
 // (resumable across ticks). Observed CPU per tick stays in the tens of ms.
 // Raise further on the Workers Paid plan (limits.cpu_ms up to 30000).
-const MAX_AGENT_OPS_PER_TICK = 4;
+const MAX_AGENT_OPS_PER_TICK = 2;
 
 export async function handleCron(env: Env): Promise<void> {
   const client  = buildClient(env);
