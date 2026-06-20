@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { DynamicWidget } from '@dynamic-labs/sdk-react-core'
+import { DynamicWidget, useDynamicContext } from '@dynamic-labs/sdk-react-core'
 import Home from './pages/Home'
 import Leaderboard from './pages/Leaderboard'
 import Windows from './pages/Windows'
@@ -12,13 +12,17 @@ import Terms from './pages/Terms'
 
 function Nav() {
   const { pathname } = useLocation()
+  const { primaryWallet } = useDynamicContext()
+  const connected = !!primaryWallet
+  // Personal / action pages only appear once a wallet is connected; the public
+  // browse pages stay visible to draw new users in.
   const links = [
-    { to: '/leaderboard', label: 'Leaderboard' },
-    { to: '/windows', label: 'Windows' },
-    { to: '/delegate', label: 'Delegate' },
-    { to: '/my-agent', label: 'My Agent' },
-    { to: '/register', label: 'Register Agent' },
-  ]
+    { to: '/leaderboard', label: 'Leaderboard', auth: false },
+    { to: '/windows', label: 'Windows', auth: false },
+    { to: '/delegate', label: 'Delegate', auth: false },
+    { to: '/my-agent', label: 'My Agent', auth: true },
+    { to: '/register', label: 'Register Agent', auth: true },
+  ].filter(l => !l.auth || connected)
   return (
     <nav style={{
       borderBottom: '1px solid rgba(255,255,255,0.08)',
