@@ -20,11 +20,15 @@ service = "veritas-agents"
 
 [vars]
 SUI_NETWORK         = "testnet"
-PACKAGE_ID          = "0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2"
-MARKET_CONFIG_ID    = "0x2b0a384a0f78f4e6360644107e9dfa69706a95e4da9beb2080a55f026d6cd044"
-REGISTRY_ID         = "0x54f5e69e3981ccaf1081e495ef7e8e8696dc96993bb7e9c3ea598760b77b4f10"
+PACKAGE_ID          = "0xe22583e78de798c4e7a715cd43edcdd7b39b623517e8e35cf6248b2002f30d5c"
+MARKET_CONFIG_ID    = "0x8ad9d81295863152dd29e61e8ba05fff74d817aade6d4b2b52c2dbf89b4e4efc"
+REGISTRY_ID         = "0x7277640f858b92bfb926552392297657dcfb5d1d52afb4b1dbc751669721c19d"
+ADMIN_CAP_ID        = "0x44f0f9541b9e7ec9731d173576b96841016e5a80b585ca1b122d96409cf850ed"
 BALANCE_MANAGER_ID  = "0x1955e671455167563b6737b1a12e5ae9272279bad07d052e5e631dedf3cf3974"
 AGENTS_WORKER_HOST  = "veritas-agents.thomzy07.workers.dev"
+# Revenue distribution is opt-in to protect the free-tier cron CPU/gas budget.
+# Set to "1" to have the Worker accrue delegator rewards after each scored window.
+ENABLE_REVENUE_DISTRIBUTION = "0"
 
 # Set these via: wrangler secret put <NAME>
 # SUI_PRIVATE_KEY   — base64 Ed25519 private key for Worker signing + admin ops

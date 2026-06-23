@@ -7,10 +7,18 @@
 /// An agent with a profile but no registry entry can participate but not
 /// accept delegation. Delegation is opt-in at deployment.
 ///
+/// Custody & rewards (pull model):
+///   - Delegated SUI is held in a per-agent `Balance<SUI>` treasury inside the
+///     registry (not forwarded to the agent), so it can be reclaimed.
+///   - Revenue accrues into a per-delegator `claimable` map; delegators pull
+///     their share by calling `claim`, paying their own gas. This avoids an
+///     unbounded per-delegator transfer loop paid by the distributor.
+///
 /// Revenue split: 80% agent / 20% delegators pro-rata by stake.
 /// No max delegator cap — market self-regulates crowding.
 module veritas::registry {
     use sui::coin::{Self, Coin};
+    use sui::balance::{Self, Balance};
     use sui::sui::SUI;
     use sui::event;
     use sui::table::{Self, Table};
@@ -18,8 +26,7 @@ module veritas::registry {
     use veritas::market_config::AdminCap;
 
     // ── constants ─────────────────────────────────────────────────────────────
-    const AGENT_SHARE_BPS:     u64 = 8_000;   // 80% to agent
-    const DELEGATOR_SHARE_BPS: u64 = 2_000;   // 20% to delegators
+    const AGENT_SHARE_BPS:     u64 = 8_000;   // 80% to agent; delegators get the remainder
     const BPS_SCALE:           u64 = 10_000;
 
     // ── errors ────────────────────────────────────────────────────────────────
@@ -28,6 +35,7 @@ module veritas::registry {
     const E_INSUFFICIENT_STAKE:     u64 = 2;
     const E_NOT_DELEGATOR:          u64 = 3;
     const E_ZERO_STAKE:             u64 = 4;
+    const E_NOTHING_TO_CLAIM:       u64 = 5;
 
     // ── structs ───────────────────────────────────────────────────────────────
 
@@ -44,6 +52,11 @@ module veritas::registry {
         endpoint:    vector<u8>,
         total_stake: u64,   // total SUI staked by delegators, in MIST
         delegators:  VecMap<address, u64>,   // delegator → stake amount in MIST
+        claimable:   VecMap<address, u64>,   // delegator → accrued reward in MIST
+        /// Custody pool: holds delegators' staked principal + their as-yet
+        /// unclaimed reward share. Agent's own cut is paid out immediately on
+        /// distribution and never enters this balance.
+        treasury:    Balance<SUI>,
         active:      bool,
     }
 
@@ -81,6 +94,12 @@ module veritas::registry {
         window_id:       ID,
     }
 
+    public struct RewardClaimed has copy, drop {
+        agent:     address,
+        delegator: address,
+        amount:    u64,
+    }
+
     // ── init ──────────────────────────────────────────────────────────────────
 
     fun init(ctx: &mut TxContext) {
@@ -106,6 +125,8 @@ module veritas::registry {
             endpoint,
             total_stake: 0,
             delegators:  vec_map::empty(),
+            claimable:   vec_map::empty(),
+            treasury:    balance::zero(),
             active:      true,
         });
 
@@ -125,6 +146,7 @@ module veritas::registry {
     }
 
     /// Delegate SUI stake to an agent.
+    /// Stake is held in the registry treasury (reclaimable via `undelegate`).
     /// Returns a DelegationReceipt proving the stake.
     public fun delegate(
         registry: &mut AgentRegistry,
@@ -149,10 +171,8 @@ module veritas::registry {
 
         entry.total_stake = entry.total_stake + amount;
 
-        // PRODUCTION TODO: store stake as Balance<SUI> inside AgentRegistry
-        // rather than transferring to the package address.
-        // For hackathon: transfer to owner as custodian (not ideal but not a burn).
-        transfer::public_transfer(stake, entry.owner);
+        // Hold principal in the registry treasury so it can be reclaimed.
+        balance::join(&mut entry.treasury, coin::into_balance(stake));
 
         let receipt = DelegationReceipt {
             id:           object::new(ctx),
@@ -167,12 +187,14 @@ module veritas::registry {
         receipt_id
     }
 
-    /// Withdraw delegation and reclaim stake.
+    /// Withdraw delegation and reclaim staked principal.
+    /// Any unclaimed rewards remain claimable via `claim`.
+    /// Returns the principal Coin<SUI> to the caller.
     public fun undelegate(
         registry: &mut AgentRegistry,
         agent:    address,
         ctx:      &mut TxContext,
-    ) {
+    ): Coin<SUI> {
         assert!(table::contains(&registry.agents, agent), E_AGENT_NOT_REGISTERED);
 
         let delegator = ctx.sender();
@@ -183,16 +205,39 @@ module veritas::registry {
         let (_, amount) = vec_map::remove(&mut entry.delegators, &delegator);
         entry.total_stake = entry.total_stake - amount;
 
-        // TODO: return Coin<SUI> from registry balance in production
+        let returned = coin::take(&mut entry.treasury, amount, ctx);
         event::emit(Undelegated { agent, delegator, returned: amount });
+        returned
+    }
+
+    /// Claim accrued reward share for the caller from one agent.
+    /// Pull model: the delegator pays their own gas. Returns the reward Coin<SUI>.
+    public fun claim(
+        registry: &mut AgentRegistry,
+        agent:    address,
+        ctx:      &mut TxContext,
+    ): Coin<SUI> {
+        assert!(table::contains(&registry.agents, agent), E_AGENT_NOT_REGISTERED);
+
+        let delegator = ctx.sender();
+        let entry     = table::borrow_mut(&mut registry.agents, agent);
+
+        assert!(vec_map::contains(&entry.claimable, &delegator), E_NOTHING_TO_CLAIM);
+        let (_, amount) = vec_map::remove(&mut entry.claimable, &delegator);
+        assert!(amount > 0, E_NOTHING_TO_CLAIM);
+
+        let reward = coin::take(&mut entry.treasury, amount, ctx);
+        event::emit(RewardClaimed { agent, delegator, amount });
+        reward
     }
 
     /// Distribute revenue from a scored window.
     /// Called by Worker with total PnL proceeds.
-    /// Agent gets 80%, delegators split 20% pro-rata.
+    /// Agent receives 80% immediately; delegators' 20% accrues into `claimable`
+    /// (held in the treasury) for them to pull via `claim`.
     public fun distribute_revenue(
         _:         &AdminCap,
-        registry:  &AgentRegistry,
+        registry:  &mut AgentRegistry,
         agent:     address,
         window_id: ID,
         mut proceeds:  Coin<SUI>,
@@ -202,31 +247,38 @@ module veritas::registry {
 
         let total      = coin::value(&proceeds);
         let agent_cut  = total * AGENT_SHARE_BPS / BPS_SCALE;
-        let deleg_cut  = total - agent_cut;
 
-        let entry = table::borrow(&registry.agents, agent);
+        let entry = table::borrow_mut(&mut registry.agents, agent);
 
-        // Agent share
+        // Agent share — paid out immediately, never custodied.
         let agent_coin = coin::split(&mut proceeds, agent_cut, ctx);
         transfer::public_transfer(agent_coin, entry.owner);
 
-        // Delegator shares pro-rata by stake
-        if (entry.total_stake > 0) {
+        // Delegator share — accrue pro-rata into claimable, custody in treasury.
+        let deleg_cut = coin::value(&proceeds);
+        if (entry.total_stake > 0 && deleg_cut > 0) {
             let mut i = 0u64;
             let n = vec_map::length(&entry.delegators);
             while (i < n) {
                 let (delegator, stake) = vec_map::get_entry_by_idx(&entry.delegators, i);
                 let share = deleg_cut * (*stake) / entry.total_stake;
                 if (share > 0) {
-                    let d_coin = coin::split(&mut proceeds, share, ctx);
-                    transfer::public_transfer(d_coin, *delegator);
+                    let d = *delegator;
+                    if (vec_map::contains(&entry.claimable, &d)) {
+                        let acc = vec_map::get_mut(&mut entry.claimable, &d);
+                        *acc = *acc + share;
+                    } else {
+                        vec_map::insert(&mut entry.claimable, d, share);
+                    };
                 };
                 i = i + 1;
             };
+            // Custody the whole delegator coin (rounding dust stays in treasury).
+            balance::join(&mut entry.treasury, coin::into_balance(proceeds));
+        } else {
+            // No delegators — return the remainder to the agent owner.
+            transfer::public_transfer(proceeds, entry.owner);
         };
-
-        // Dust from rounding stays in the Worker — acceptable
-        transfer::public_transfer(proceeds, entry.owner);
 
         event::emit(RevenueDistributed {
             agent,
@@ -248,5 +300,21 @@ module veritas::registry {
 
     public fun total_stake(registry: &AgentRegistry, agent: address): u64 {
         table::borrow(&registry.agents, agent).total_stake
+    }
+
+    /// Caller's (or any delegator's) current staked principal with `agent`.
+    public fun stake_of(registry: &AgentRegistry, agent: address, delegator: address): u64 {
+        let entry = table::borrow(&registry.agents, agent);
+        if (vec_map::contains(&entry.delegators, &delegator)) {
+            *vec_map::get(&entry.delegators, &delegator)
+        } else { 0 }
+    }
+
+    /// Reward currently claimable by `delegator` from `agent`, in MIST.
+    public fun claimable_of(registry: &AgentRegistry, agent: address, delegator: address): u64 {
+        let entry = table::borrow(&registry.agents, agent);
+        if (vec_map::contains(&entry.claimable, &delegator)) {
+            *vec_map::get(&entry.claimable, &delegator)
+        } else { 0 }
     }
 }

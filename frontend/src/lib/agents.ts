@@ -1,7 +1,7 @@
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 
 const client = new SuiClient({ url: getFullnodeUrl('testnet') })
-export const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
+export const PACKAGE_ID = '0xe22583e78de798c4e7a715cd43edcdd7b39b623517e8e35cf6248b2002f30d5c'
 
 export const TIER_CONFIG: Record<number, { label: string; color: string; bg: string; description: string }> = {
   0: { label: 'Unranked', color: 'rgba(255,255,255,0.3)', bg: 'rgba(255,255,255,0.05)', description: 'Complete 10 windows to earn a tier' },

@@ -6,7 +6,9 @@ export interface Env {
   PACKAGE_ID:          string;
   MARKET_CONFIG_ID:    string;
   REGISTRY_ID:         string;
+  ADMIN_CAP_ID:        string;   // AdminCap owned by the Worker keypair — gates distribute_revenue
   BALANCE_MANAGER_ID:  string;   // Deepbook BalanceManager object ID — set after /admin/setup-deepbook
+  ENABLE_REVENUE_DISTRIBUTION?: string;  // "1" to accrue delegator rewards after each scored window
   SUI_PRIVATE_KEY:     string;   // secret
   COINGECKO_API_KEY:   string;   // secret
   SALT_SECRET:         string;   // secret — used for deterministic salt derivation
@@ -49,6 +51,7 @@ export interface WindowMeta {
   outcomePrice?:   number;    // Deepbook/CoinGecko mid at resolvesAt, scaled 1e6
   resolvedOnChain?: boolean;  // window::resolve() has been submitted
   scoredAgents?:   string[];  // agents whose score/miss has been recorded on-chain
+  distributedAgents?: string[]; // agents whose delegator revenue has been distributed (opt-in)
 }
 
 // ── Feed ──────────────────────────────────────────────────────────────────────

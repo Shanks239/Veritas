@@ -3,8 +3,8 @@ import { isSuiWallet } from '@dynamic-labs/sui'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 
-const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
-const REGISTRY_ID = '0x54f5e69e3981ccaf1081e495ef7e8e8696dc96993bb7e9c3ea598760b77b4f10'
+const PACKAGE_ID = '0xe22583e78de798c4e7a715cd43edcdd7b39b623517e8e35cf6248b2002f30d5c'
+const REGISTRY_ID = '0x7277640f858b92bfb926552392297657dcfb5d1d52afb4b1dbc751669721c19d'
 
 export { PACKAGE_ID, REGISTRY_ID }
 
@@ -71,6 +71,33 @@ export function useSuiTransaction() {
     return signAndExecute(tx)
   }
 
+  function walletAddr(): string {
+    if (!primaryWallet) throw new Error('No wallet connected')
+    return (primaryWallet as unknown as { address: string }).address
+  }
+
+  /** Pull accrued reward share from one agent. Returns the claimed Coin to the caller. */
+  async function claimRewards(agentAddress: string): Promise<string> {
+    const tx = new Transaction()
+    const coin = tx.moveCall({
+      target:    `${PACKAGE_ID}::registry::claim`,
+      arguments: [tx.object(REGISTRY_ID), tx.pure.address(agentAddress)],
+    })
+    tx.transferObjects([coin], walletAddr())
+    return signAndExecute(tx)
+  }
+
+  /** Withdraw staked principal from one agent. Returns the principal Coin to the caller. */
+  async function undelegateStake(agentAddress: string): Promise<string> {
+    const tx = new Transaction()
+    const coin = tx.moveCall({
+      target:    `${PACKAGE_ID}::registry::undelegate`,
+      arguments: [tx.object(REGISTRY_ID), tx.pure.address(agentAddress)],
+    })
+    tx.transferObjects([coin], walletAddr())
+    return signAndExecute(tx)
+  }
+
   async function updateEndpoint(endpoint: string): Promise<string> {
     const tx = new Transaction()
     tx.moveCall({
@@ -92,5 +119,5 @@ export function useSuiTransaction() {
     return signAndExecute(tx)
   }
 
-  return { registerAgent, updateEndpoint, delegateStake, createProfile, signAndExecute }
+  return { registerAgent, updateEndpoint, delegateStake, claimRewards, undelegateStake, createProfile, signAndExecute }
 }

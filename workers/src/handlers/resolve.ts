@@ -18,6 +18,8 @@ import {
   txReveal,
   txRecordScore,
   txRecordMiss,
+  txDistributeRevenue,
+  readTotalStake,
   type SuiClientType,
   type SuiKeypairType,
 } from '../lib/sui';
@@ -100,7 +102,74 @@ export async function resolveAndScore(
     await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
   }
 
-  return agents.every(a => scored.has(a));
+  const allScored = agents.every(a => scored.has(a));
+  if (!allScored) return false;
+
+  // 4. Optional pull-model revenue distribution. Opt-in via env to protect the
+  // free-tier cron CPU/gas budget; accrues delegator rewards only for agents
+  // that have stake behind them. Resumable across ticks via distributedAgents.
+  if (env.ENABLE_REVENUE_DISTRIBUTION === '1') {
+    return distributeWindowRevenue(meta, agents, client, keypair, env, budget);
+  }
+  return true;
+}
+
+// ── Revenue distribution (opt-in) ───────────────────────────────────────────
+
+/**
+ * Reward pool per scored window, scaled by the agent's composite score
+ * (which is in [0,1]). A perfect window pays out this much SUI total — 80% to
+ * the agent, 20% split pro-rata into delegators' claimable balances.
+ */
+const MAX_REWARD_MIST = 50_000_000;   // 0.05 SUI
+
+/**
+ * For each committed agent that has delegators, distribute a performance-scaled
+ * reward so delegators accrue a claimable balance. Pre-checks (KV score read +
+ * read-only stake lookup) are free; only the on-chain distribute tx spends from
+ * the tick budget. Marks each agent done so the pass resumes cleanly next tick.
+ */
+async function distributeWindowRevenue(
+  meta:    WindowMeta,
+  agents:  string[],
+  client:  SuiClientType,
+  keypair: SuiKeypairType,
+  env:     Env,
+  budget:  TickBudget,
+): Promise<boolean> {
+  const done = new Set(meta.distributedAgents ?? []);
+
+  for (const agent of agents) {
+    if (done.has(agent)) continue;
+
+    // Cheap pre-checks: needs a recorded score, positive composite, and stake.
+    let rewardMist = 0n;
+    const scoreRaw = await env.KV.get(KVKey.windowScore(meta.windowId, agent));
+    if (scoreRaw) {
+      const composite = (JSON.parse(scoreRaw) as { composite?: number }).composite ?? 0;
+      if (composite > 0) {
+        const stake = await readTotalStake(client, env, agent);
+        if (stake > 0n) rewardMist = BigInt(Math.round(composite * MAX_REWARD_MIST));
+      }
+    }
+
+    if (rewardMist > 0n) {
+      if (budget.remaining <= 0) return false;   // out of budget — resume next tick
+      budget.remaining--;
+      try {
+        await txDistributeRevenue(client, keypair, env, agent, meta.windowId, rewardMist);
+        console.log(`[resolve] distributed ${rewardMist} MIST for ${agent} (window ${meta.windowId})`);
+      } catch (err) {
+        console.error(`[resolve] distribute failed for ${agent}:`, err);
+      }
+    }
+
+    done.add(agent);
+    meta.distributedAgents = [...done];
+    await env.KV.put(KVKey.windowMeta(meta.windowId), JSON.stringify(meta));
+  }
+
+  return agents.every(a => done.has(a));
 }
 
 // ── Per-agent scoring ─────────────────────────────────────────────────────────

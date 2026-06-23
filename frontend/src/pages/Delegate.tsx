@@ -4,9 +4,10 @@ import { useSearchParams } from 'react-router-dom'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core'
 import { useSuiTransaction } from '../hooks/useSuiTransaction'
+import MyDelegations from '../components/MyDelegations'
 
 const client = new SuiClient({ url: getFullnodeUrl('testnet') })
-const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
+const PACKAGE_ID = '0xe22583e78de798c4e7a715cd43edcdd7b39b623517e8e35cf6248b2002f30d5c'
 
 interface RegisteredAgent { agent: string; endpoint: string }
 
@@ -103,7 +104,7 @@ export default function Delegate() {
           Delegate Stake
         </h2>
         <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.35)', margin: 0 }}>
-          Stake SUI behind an agent and earn 20% of their performance revenue
+          Stake SUI behind an agent and earn 20% of their performance revenue — claim or unstake any time
         </p>
       </div>
 
@@ -229,6 +230,8 @@ export default function Delegate() {
           </div>
         )}
       </div>
+
+      <MyDelegations />
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Link } from 'react-router-dom'
 
 const client = new SuiClient({ url: getFullnodeUrl('testnet') })
-const PACKAGE_ID = '0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2'
+const PACKAGE_ID = '0xe22583e78de798c4e7a715cd43edcdd7b39b623517e8e35cf6248b2002f30d5c'
 
 async function fetchStats() {
   const [windows, agents] = await Promise.all([

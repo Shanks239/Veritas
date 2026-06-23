@@ -406,3 +406,65 @@ export async function txUpdateTiming(
   });
   return signAndExecute(client, keypair, tx);
 }
+/**
+ * registry::distribute_revenue(admin_cap, registry, agent, window_id, proceeds)
+ * Splits `rewardMist` from the Worker's gas coin as the window's proceeds:
+ * 80% is paid to the agent immediately, the remaining 20% accrues into each
+ * delegator's on-chain `claimable` balance (pull model — delegators call
+ * registry::claim themselves). Requires the AdminCap held by the Worker.
+ */
+export async function txDistributeRevenue(
+  client:     SuiClient,
+  keypair:    Ed25519Keypair,
+  env:        Env,
+  agent:      string,
+  windowId:   string,
+  rewardMist: bigint,
+): Promise<string> {
+  const tx = new Transaction();
+  const [proceeds] = tx.splitCoins(tx.gas, [rewardMist]);
+  tx.moveCall({
+    target:    `${env.PACKAGE_ID}::registry::distribute_revenue`,
+    arguments: [
+      tx.object(env.ADMIN_CAP_ID),
+      tx.object(env.REGISTRY_ID),
+      tx.pure.address(agent),
+      tx.pure.id(windowId),
+      proceeds,
+    ],
+  });
+  return signAndExecute(client, keypair, tx);
+}
+
+/**
+ * Read a delegated agent's total staked principal (MIST) via a read-only
+ * devInspect of registry::total_stake. Returns 0 if the agent has no entry or
+ * no delegators. Cheap (no gas, one RPC) — used to skip distribution for agents
+ * nobody has staked behind.
+ */
+export async function readTotalStake(
+  client: SuiClient,
+  env:    Env,
+  agent:  string,
+): Promise<bigint> {
+  try {
+    const tx = new Transaction();
+    tx.moveCall({
+      target:    `${env.PACKAGE_ID}::registry::total_stake`,
+      arguments: [tx.object(env.REGISTRY_ID), tx.pure.address(agent)],
+    });
+    const res = await client.devInspectTransactionBlock({
+      sender: agent,
+      transactionBlock: tx,
+    });
+    const ret = res.results?.[0]?.returnValues?.[0];
+    if (!ret) return 0n;
+    const bytes = Uint8Array.from(ret[0]);
+    // u64 little-endian
+    let v = 0n;
+    for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i]);
+    return v;
+  } catch {
+    return 0n;
+  }
+}

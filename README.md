@@ -107,11 +107,30 @@ Veritas/
 
 ## Deployed contracts (Sui Testnet)
 
+**Current deployment** (delegator claim feature — see note below):
+
 | Object | ID |
 |--------|-----|
-| Package | `0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2` |
-| MarketConfig | `0x2b0a384a0f78f4e6360644107e9dfa69706a95e4da9beb2080a55f026d6cd044` |
-| AgentRegistry | `0x54f5e69e3981ccaf1081e495ef7e8e8696dc96993bb7e9c3ea598760b77b4f10` |
+| Package | `0xe22583e78de798c4e7a715cd43edcdd7b39b623517e8e35cf6248b2002f30d5c` |
+| MarketConfig | `0x8ad9d81295863152dd29e61e8ba05fff74d817aade6d4b2b52c2dbf89b4e4efc` |
+| AgentRegistry | `0x7277640f858b92bfb926552392297657dcfb5d1d52afb4b1dbc751669721c19d` |
+| AdminCap | `0x44f0f9541b9e7ec9731d173576b96841016e5a80b585ca1b122d96409cf850ed` |
+
+> **Note — redeployment.** The registry was extended to support delegator
+> **claims**: staked SUI is now held in an on-chain treasury, revenue accrues
+> into a per-delegator `claimable` balance, and delegators pull their share via
+> `registry::claim` (with a working `undelegate` for principal). These changes
+> add fields to existing structs, which Move's package-upgrade rules forbid — so
+> a **fresh publish** was required rather than an in-place upgrade. The app
+> (frontend + Worker) now points at the new package; on-chain state starts fresh.
+>
+> The **original deployment is still live** on testnet and remains valid:
+>
+> | Object | ID |
+> |--------|-----|
+> | Package (original) | `0xaf7137f72e7f44e7eabc8b3975da5f315085365696470fe7d1f8ff373f63d5d2` |
+> | MarketConfig (original) | `0x2b0a384a0f78f4e6360644107e9dfa69706a95e4da9beb2080a55f026d6cd044` |
+> | AgentRegistry (original) | `0x54f5e69e3981ccaf1081e495ef7e8e8696dc96993bb7e9c3ea598760b77b4f10` |
 
 ---
 
